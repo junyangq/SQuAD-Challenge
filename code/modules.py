@@ -77,6 +77,10 @@ class RNNEncoder(object):
             return out
 
 
+
+
+
+
 class SimpleSoftmaxLayer(object):
     """
     Module to take set of hidden states, (e.g. one for each context location),
@@ -113,6 +117,9 @@ class SimpleSoftmaxLayer(object):
             masked_logits, prob_dist = masked_softmax(logits, masks, 1)
 
             return masked_logits, prob_dist
+
+
+
 
 
 class BasicAttn(object):
@@ -174,6 +181,98 @@ class BasicAttn(object):
             output = tf.nn.dropout(output, self.keep_prob)
 
             return attn_dist, output
+
+
+
+class CoAttn(object):
+    """Module for basic attention.
+
+    Note: in this module we use the terminology of "keys" and "values" (see lectures).
+    In the terminology of "X attends to Y", "keys attend to values".
+
+    In the baseline model, the keys are the context hidden states
+    and the values are the question hidden states.
+
+    We choose to use general terminology of keys and values in this module
+    (rather than context and question) to avoid confusion if you reuse this
+    module with other inputs.
+    """
+
+    def __init__(self, keep_prob, key_vec_size, value_vec_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          key_vec_size: size of the key vectors. int
+          value_vec_size: size of the value vectors. int
+        """
+        self.keep_prob = keep_prob
+        self.key_vec_size = key_vec_size
+        self.value_vec_size = value_vec_size
+
+    def build_graph(self, values, values_mask, keys):
+        """
+        Keys attend to values.
+        For each key, return an attention distribution and an attention output vector.
+
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          keys: Tensor shape (batch_size, num_keys, value_vec_size)
+
+        Outputs:
+          attn_dist: Tensor shape (batch_size, num_keys, num_values).
+            For each key, the distribution should sum to 1,
+            and should be 0 in the value locations that correspond to padding.
+          output: Tensor shape (batch_size, num_keys, hidden_size).
+            This is the attention output; the weighted sum of the values
+            (using the attention distribution as weights).
+        """
+        with vs.variable_scope("CoAttn"):
+            # Declare variable 
+            W = tf.get_variable("W", shape = (values.shape[2], value_vec_size[2]), \
+                initializer = tf.tf.contrib.layers.xavier_initializer())
+            b = tf.get_variable("b", shape = (values.shape[2],), initializer = tf.constant_initializer(0))
+
+            # Compute projected question hidden states
+            values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
+            Q = tf.tanh(tf.matmul(W, values_t) + b) # (batch_size, value_vec_size, num_values)
+            D = tf.transpose(keys, perm = [0, 2, 1]) # (batch_size, value_vec_size, num_keys)
+            ### Start your code here to implement 'Sentinel Vector'
+
+
+            ### End your code here to implement 'Sentinel Vector'
+
+            # Compute affinity matrix L
+            L = tf.matmul(D, Q) # shape (batch_size, num_keys, num_values)
+
+            # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
+            A_D = tf.nn.softmax(tf.transpose(L, perm = [0, 2, 1]), dim = -1) #(batch_size, num_values, num_keys)
+            C2Q_Attn = tf.matmul(Q, A_D) # (batch_size, value_vec_size, num_keys)
+
+            # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
+            A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
+            Q2C_Attn = tf.matmul(D, A_Q) # (batch_size, value_vec_size, num_values)
+
+
+            # Compute second-level attention outputs S
+            S = tf.matmul(Q2C_Attn, A_D) # (batch_size, value_vec_size, num_keys)
+
+            # Concatenate C2Q_Attn and S:
+            co_input = tf.concat([C2Q_Attn, S], 1)
+
+            (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
+                tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
+                  tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
+                   co_input)
+            U = tf.concat([u_fw_out, u_bw_out], 1)
+
+
+            return U
+
+
+
+
 
 
 def masked_softmax(logits, mask, dim):
