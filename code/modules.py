@@ -230,8 +230,8 @@ class CoAttn(object):
         """
         with vs.variable_scope("CoAttn"):
             # Declare variable 
-            W = tf.get_variable("W", shape = (values.shape[2], value_vec_size[2]), \
-                initializer = tf.tf.contrib.layers.xavier_initializer())
+            W = tf.get_variable("W", shape = (values.shape[2], values.shape[2]), \
+                initializer = tf.contrib.layers.xavier_initializer())
             b = tf.get_variable("b", shape = (values.shape[2],), initializer = tf.constant_initializer(0))
 
             # Compute projected question hidden states
