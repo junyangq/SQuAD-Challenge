@@ -337,7 +337,7 @@ class CoAttn(object):
                 tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
                   tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
                    co_input)
-            U = tf.concat([u_fw_out, u_bw_out], 1)
+            U = tf.nn.dropout(tf.concat([u_fw_out, u_bw_out], 1), self.keep_prob)
 
 
             return U
