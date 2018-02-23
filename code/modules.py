@@ -301,15 +301,27 @@ class CoAttn(object):
             (using the attention distribution as weights).
         """
         with vs.variable_scope("CoAttn"):
+
+            print('value_vec_size is: ', self.value_vec_size)
+            print('num_values size is: ', values.shape[1])
+            print('num_keys size is: ', keys.shape[1])
+            print('value_vec_size is (key):', keys.shape[2])
             # Declare variable 
-            W = tf.get_variable("W", shape = (values.shape[2], values.shape[2]), \
+            W = tf.get_variable("W", shape = (self.value_vec_size, self.value_vec_size), \
                 initializer = tf.contrib.layers.xavier_initializer())
-            b = tf.get_variable("b", shape = (values.shape[2],), initializer = tf.constant_initializer(0))
+            b = tf.get_variable("b", shape = (values.shape[1], self.value_vec_size), initializer = tf.constant_initializer(0))
 
             # Compute projected question hidden states
-            values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            Q = tf.tanh(tf.matmul(W, values_t) + b) # (batch_size, value_vec_size, num_values)
-            D = tf.transpose(keys, perm = [0, 2, 1]) # (batch_size, value_vec_size, num_keys)
+
+            values_t = tf.reshape(values, shape = [-1, self.value_vec_size]) # of shape (batch_size * num_values, value_vec_size)
+            Q = tf.tanh(tf.reshape(tf.matmul(values_t, W), shape = [-1, values.shape[1], self.value_vec_size]) + tf.expand_dims(b, axis = 0)) #(batch_size, num_values, value_vec_size)
+            #values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
+            #Q = tf.tanh(tf.matmul(W, values_t) + b) # (batch_size, value_vec_size, num_values)
+
+            print('Q shape is: ', Q.shape)
+            Q = tf.transpose(Q, perm = [0, 2, 1]) #(batch_size, value_vec_size, num_values)
+            print('Q shape is: ', Q.shape)
+            D = keys # (batch_size, num_keys, value_vec_size)
             ### Start your code here to implement 'Sentinel Vector'
 
 
@@ -324,20 +336,22 @@ class CoAttn(object):
 
             # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
             A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
-            Q2C_Attn = tf.matmul(D, A_Q) # (batch_size, value_vec_size, num_values)
+            Q2C_Attn = tf.matmul(tf.transpose(D, perm = [0, 2, 1]), A_Q) # (batch_size, value_vec_size, num_values)
 
 
             # Compute second-level attention outputs S
             S = tf.matmul(Q2C_Attn, A_D) # (batch_size, value_vec_size, num_keys)
 
             # Concatenate C2Q_Attn and S:
-            co_input = tf.concat([C2Q_Attn, S], 1)
+            co_input = tf.concat([C2Q_Attn, S], 1) 
 
+            size = int(self.value_vec_size / 2)
             (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
                 tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
                   tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
-                   co_input)
-            U = tf.nn.dropout(tf.concat([u_fw_out, u_bw_out], 1), self.keep_prob)
+                   co_input,\
+                   dtype = tf.float32)
+            U = tf.concat([u_fw_out, u_bw_out], 1)
 
 
             return U
