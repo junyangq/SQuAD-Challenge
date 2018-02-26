@@ -342,16 +342,30 @@ class CoAttn(object):
             # Compute second-level attention outputs S
             S = tf.matmul(Q2C_Attn, A_D) # (batch_size, value_vec_size, num_keys)
 
+            print('S size is: ', S.shape)
+
             # Concatenate C2Q_Attn and S:
-            co_input = tf.concat([C2Q_Attn, S], 1) 
+            C_D = tf.transpose(tf.concat([C2Q_Attn, S], 1), perm = [0, 2, 1] ) # (batch_size, 2 * value_vec_size, num_keys)
+
+            print('co_context size is: ', C_D.shape)
+
+
+
+
+            # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
+            # print('co_input size is: ', co_input.shape)
+
 
             size = int(self.value_vec_size / 2)
             (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
-                tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
-                  tf.nn.rnn_cell.BasicLSTMCell(size, forget_bias = 1.0),\
-                   co_input,\
+                tf.nn.rnn_cell.BasicLSTMCell(size),\
+                  tf.nn.rnn_cell.BasicLSTMCell(size),\
+                   C_D,\
                    dtype = tf.float32)
-            U = tf.concat([u_fw_out, u_bw_out], 1)
+            print('u_fw_out shape is : ', u_fw_out.shape)
+            print('u_bw_out shape is : ', u_bw_out.shape)
+
+            U = tf.concat([u_fw_out, u_bw_out], 2)
 
 
             return U
