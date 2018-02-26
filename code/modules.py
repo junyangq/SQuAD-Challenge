@@ -356,7 +356,7 @@ class CoAttn(object):
             # print('co_input size is: ', co_input.shape)
 
 
-            size = int(self.value_vec_size / 2)
+            size = int(self.value_vec_size)
             (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
                 tf.nn.rnn_cell.BasicLSTMCell(size),\
                   tf.nn.rnn_cell.BasicLSTMCell(size),\
@@ -366,6 +366,8 @@ class CoAttn(object):
             print('u_bw_out shape is : ', u_bw_out.shape)
 
             U = tf.concat([u_fw_out, u_bw_out], 2)
+
+            print('U shape is: ', U.shape)
 
 
             return U
