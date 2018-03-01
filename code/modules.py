@@ -84,7 +84,7 @@ class DPDecoder(object):
 
     """
 
-    def __init__(self, keep_prob, num_iterations, context_len, hidden_size, embed_size):
+    def __init__(self, keep_prob, num_iterations, context_len, hidden_size, pool_size):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
@@ -97,47 +97,42 @@ class DPDecoder(object):
         self.num_iterations = num_iterations
         self.context_len = context_len
         self.hidden_size = hidden_size
-        self.embed_size = embed_size
+        self.pool_size = pool_size
         self.LSTM_dec = tf.contrib.rnn.BasicLSTMCell(self.hidden_size)
         
     
     def HMN(self, U, hi, us, ue, scope):
       '''
       Inputs:
-        U: batch*2l*m=?*800*600
+        U: batch * m * 2l
       '''
       with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
         xavier = tf.contrib.layers.xavier_initializer()
-        W1 = tf.get_variable('W1',shape=[self.embed_size, self.hidden_size, 3*self.hidden_size], initializer=xavier, dtype=tf.float32)
-        W2 = tf.get_variable('W2',shape=[self.embed_size, self.hidden_size, self.hidden_size], initializer=xavier, dtype=tf.float32)
-        W3 = tf.get_variable('W3',shape=[self.embed_size, 1, 2*self.hidden_size], initializer=xavier, dtype=tf.float32)
+        W11 = tf.get_variable('W11',shape=[self.pool_size, self.hidden_size, 2*self.hidden_size], initializer=xavier, dtype=tf.float32)
+        W12 = tf.get_variable('W12',shape=[self.pool_size, self.hidden_size, self.hidden_size], initializer=xavier, dtype=tf.float32)
+        W2 = tf.get_variable('W2',shape=[self.pool_size, self.hidden_size, self.hidden_size], initializer=xavier, dtype=tf.float32)
+        W3 = tf.get_variable('W3',shape=[self.pool_size, 1, 2*self.hidden_size], initializer=xavier, dtype=tf.float32)
         WD = tf.get_variable('WD',shape=[self.hidden_size, 5*self.hidden_size], initializer=xavier, dtype=tf.float32)
-        b1 = tf.get_variable('b1',shape=[1, self.embed_size, self.hidden_size, 1], initializer=tf.zeros_initializer(), dtype=tf.float32)
-        b2 = tf.get_variable('b2',shape=[1, self.embed_size, self.hidden_size, 1],initializer=tf.zeros_initializer(),dtype=tf.float32)
-        b3 = tf.get_variable('b3',shape=[self.embed_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
+        b1 = tf.get_variable('b1',shape=[self.pool_size, self.hidden_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
+        b2 = tf.get_variable('b2',shape=[self.pool_size, self.hidden_size],initializer=tf.zeros_initializer(),dtype=tf.float32)
+        b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
 
+      concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
+      
+      r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
 
-      U = tf.transpose(U, perm=[0, 2, 1]) # U: (B * 2l * m)
+      Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
-      r=tf.tanh(tf.matmul(tf.tile(tf.expand_dims(WD, 0), [tf.shape(U)[0], 1, 1]),
-        tf.expand_dims(tf.concat([hi, us, ue], axis = 1), 2))) # r: (B * l)
-      expand_r = tf.tile(r, [1, 1, self.context_len]) # expand_r: (B * l * m)
+      Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
+      Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+      mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
 
-      concat_r = tf.concat([U, expand_r], axis=1)  # concat_r: B * 3l * m
-      t1 = tf.matmul(tf.tile(tf.expand_dims(W1, 0), [tf.shape(U)[0], 1, 1, 1]), 
-                    tf.tile(tf.expand_dims(concat_r, 1), [1, self.embed_size, 1, 1])) + b1 # t1: (B * p * l * m)
-      mt1 = tf.reduce_max(t1, axis=1) # mt1: (B * l * m)
+      Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+      mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
 
-      t2 = tf.matmul(tf.tile(tf.expand_dims(W2, 0), [tf.shape(U)[0], 1, 1, 1]), 
-                    tf.tile(tf.expand_dims(mt1, 1), [1, self.embed_size, 1, 1])) + b2 # t2: (B * p * l * m)
-
-      mt2 = tf.reduce_max(t2, axis=1) # mt2: (B * l * m)
-
-      z_out = tf.matmul(tf.tile(tf.expand_dims(W3, 0), [tf.shape(U)[0], 1, 1, 1]),
-                       tf.tile(tf.expand_dims(tf.concat([mt1, mt2], axis=1), 1), [1, self.embed_size, 1, 1])) \
-              + tf.reshape(b3, shape=[1, self.embed_size, 1, 1]) # z_out: (B * p * 1 * m)
-
-      out = tf.reduce_max(z_out, axis=[1, 2])  # out: (B * m)
+      concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
+      Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
+      out = tf.reduce_max(Z3, 2)  # out: (B * m)
 
       return out
 
