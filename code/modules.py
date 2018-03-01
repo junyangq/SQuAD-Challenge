@@ -96,20 +96,78 @@ class DPDecoder(object):
     This code uses a bidirectional GRU, but you could experiment with other types of RNN.
     """
 
-    def __init__(self, hidden_size, keep_prob, num_iterations):
+    def __init__(self, hidden_size, keep_prob, num_iterations,m,l,p):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
+          m: flag.context_length
+          l: 2*flag.hidden_size=value_vec_size=400
+          p: pool_size
           keep_prob: Tensor containing a single scalar that is the keep probability (for dropout)
         """
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.num_iterations = num_iterations
         self.LSTM_dec = tf.nn.rnn_cell.LSTMCell(hidden_size)
+        self.m = m
+        
         # self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
         # self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
         # self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
         # self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
+        
+    
+    def HMN(U, hi, us, ue, scope):
+      '''
+      Inputs:
+        U: batch*2l*m=?*800*600
+      '''
+      with tf.variable_scope(scope):
+        xavier=tf.contrib.layers.xavier_initializer()
+        W1=tf.get_variable('W1',shape=[p,l,3*l],initializer=xavier,dtype=tf.float32)
+        W2=tf.get_variable('W2',shape=[p,l,l],initializer=xavier,dtype=tf.float32)
+        W3=tf.get_variable('W3',shape=[p,1,2*l],initializer=xavierx)
+        WD=tf.get_variable('WD',shape=[l,5*l],initializer=xavier,dtype=tf.float32)
+        b1=tf.get_variable('b1',shape=[1,p,l,1],initializer=tf.zeros_initializer())#totile
+        #expand_b1
+        b2=tf.get_variable('b2',shape=[1,p,l],initializer=tf.zeros_initializer(),dtype=tf.float32)#totile
+        b3=tf.get_variable('b3',shape=[p],initializer=tf.zeros_initializer(),dtype=tf.float32)
+
+
+      U = tf.transpose(U, perm=[0, 2, 1]) # U: (B * m * 2l)
+      r=tf.tanh(tf.matmul(WD,tf.concat([hi, us, ue], axis = 1)))
+      # r: (B * l)
+      expand_r = tf.tile(tf.expand_dims(r, 2), [1, 1, self.m])
+      # expand_r: (B * l * m)
+
+      # check DIMS! tf broadcast or not?
+      t1 = tf.matmul(tf.expand_dims(W1, 0), 
+                    tf.expand_dims(tf.concat([U, expand_r], axis=1), 1)) + \
+           + tf.reshape(b1, shape=[1, p, l, 1])
+      # t1: (B * p * l * m)
+      mt1 = tf.reduce_max(t1, axis=1)
+      # mt1: (B * l * m)
+
+      t2 = tf.matmul(tf.expand_dims(W2, 0), tf.expand_dims(mt1, 1)) + \
+           + tf.reshape(b2, shape=[1, p, l, 1])
+      # t2: (B * p * l * m)
+
+      mt2 = tf.reduce_max(t2, axis=1)
+      # mt2: (B * l * m)
+
+      z_out = tf.matmul(tf.expand_dims(W3, 0),
+                       tf.expand_dims(tf.concat([mt1, mt2], axis=1), 1)) + \
+              + tf.reshape(b3, shape=[1, p, 1, 1])
+      # z_out: (B * p * 1 * m)
+
+      out = tf.reduce_max(z_out, axis=[1, 2])
+      # out: (B * m)
+
+      # expected mt1: (batch * p * l * m)
+      # mt1: 
+
+
+    
 
     def build_graph(self, U):
         """
@@ -136,11 +194,13 @@ class DPDecoder(object):
             s = start_pos
             e = end_pos
             for _ in range(self.num_iterations):
-                hidden = self.LSTM_dec(tf.concat([U[:,s], U[:,e]], 1), hidden)
-                alpha = self.HMN_start(U, hidden, s, e)
-                beta = self.HMN_end(U, hidden, s, e)
-                s = tf.argmax(alpha, axis=1)
-                e = tf.argmax(beta, axis=1)
+                Us = U[:, s]
+                Ue = U[:, e]
+                hidden = self.LSTM_dec(tf.concat([Us, Ue], 1), hidden)
+                alpha = self.HMN(U, hidden, Us, Ue, scope="start")
+                beta = self.HMN(U, hidden, Us, Ue, scope="end")
+                s = tf.argmax(alpha, axis=1) # s: B
+                e = tf.argmax(beta, axis=1) # e: B
 
             # (fw_out, bw_out), _ = tf.nn.dynamic_rnn(self.lstm_cell, inputs, input_lens, dtype=tf.float32)
 
@@ -150,7 +210,8 @@ class DPDecoder(object):
             # # Apply dropout
             # out = tf.nn.dropout(out, self.keep_prob)
 
-            return s, e
+            return alpha, beta  #alpha: B * m, beta: B * m
+
 
 
 class SimpleSoftmaxLayer(object):
