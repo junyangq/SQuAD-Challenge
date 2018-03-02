@@ -18,7 +18,6 @@ import tensorflow as tf
 from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
-from tensorflow.contrib.cudnn_rnn.python.ops import cudnn_rnn_ops
 
 
 class RNNEncoder(object):
@@ -99,10 +98,10 @@ class DPDecoder(object):
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.pool_size = pool_size
-        self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
+        self.LSTM_dec = tf.contrib.rnn.BasicLSTMCell(self.hidden_size)
         
     
-    def HMN(self, U, hi, us, ue, mask, scope):
+    def HMN(self, U, hi, us, ue, scope):
       '''
       Inputs:
         U: batch * m * 2l
@@ -118,40 +117,39 @@ class DPDecoder(object):
         b2 = tf.get_variable('b2',shape=[self.pool_size, self.hidden_size],initializer=tf.zeros_initializer(),dtype=tf.float32)
         b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
 
-        concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
+      concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
       
-        r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
+      r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
 
-        Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
+      Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
-        Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
-        Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
-        mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
+      Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
+      Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+      mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
 
-        Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
-        mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+      Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+      mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
 
-        concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
-        Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-        logits = tf.reduce_max(Z3, 2)  # out: (B * m)
+      concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
+      Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
+      out = tf.reduce_max(Z3, 2)  # out: (B * m)
 
-      return masked_softmax(logits, mask, 1)
+      return out
 
 
     
 
-    def build_graph(self, U, context_mask):
+    def build_graph(self, U):
         """
         Inputs:
           U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
-          context_mask: Tensor shape (batch_size, context_len). 1s where there's real input, 0s where there's padding
 
         Returns:
           out:
             alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
             beta: Tensor shape (batch_size, context_len). Logits of end position for each word
         """
-        with vs.variable_scope("DPDecoder", reuse=tf.AUTO_REUSE):
+        with vs.variable_scope("DPDecoder"):
 
             h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
@@ -167,14 +165,13 @@ class DPDecoder(object):
                 Ue = tf.gather_nd(U, e_stk)
                 _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 hidden = h_state[0]
-                alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
-                beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
-
+                alpha = self.HMN(U, hidden, Us, Ue, scope="start")
+                beta = self.HMN(U, hidden, Us, Ue, scope="end")
                 print 'alpha shape: ', alpha.shape
                 s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
                 e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
 
-            return alpha, beta, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
+            return alpha, beta  # alpha: (B * m), beta: (B * m)
 
 
 
@@ -350,18 +347,18 @@ class CoAttn(object):
 
             # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
             if use_mask:
-                A_D = masked_softmax(logits = tf.transpose(L, perm = [0, 2, 1]), mask = keys_mask, dim = -1)
+                A_D = masked_softmax(logits = tf.transpose(L, perm = [0, 2, 1]), mask = keys_mask, dim = 1)
             else:
-                A_D = tf.nn.softmax(tf.transpose(L, perm = [0, 2, 1]), dim = -1) #(batch_size, num_values, num_keys)
+                A_D = tf.nn.softmax(tf.transpose(L, perm = [0, 2, 1]), dim = 1) #(batch_size, num_values, num_keys)
 
             C2Q_Attn = tf.matmul(Q, A_D) # (batch_size, value_vec_size, num_keys)
 
             # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
             #A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
             if use_mask:
-                A_Q = masked_softmax(logits = L, mask = values_mask, dim = -1)
+                A_Q = masked_softmax(logits = L, mask = values_mask, dim = 1)
             else:
-                A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
+                A_Q = tf.nn.softmax(L, dim = 1) # (batch_size, num_keys, num_values)
 
 
             Q2C_Attn = tf.matmul(tf.transpose(D, perm = [0, 2, 1]), A_Q) # (batch_size, value_vec_size, num_values)
@@ -377,16 +374,6 @@ class CoAttn(object):
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
-            
-            # bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
-            # C_D = tf.transpose(C_D, perm=[2, 0, 1])
-            # input_h = tf.zeros([1, tf.shape(values)[0], size])
-            # input_c = tf.zeros([1, tf.shape(values)[0], size])
-            
-            # U, _ = bidirection_rnn(C_D, input_h, input_c)
-
-            # U = tf.transpose(U, perm=[1, 0, 2])
-
             (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
                 tf.nn.rnn_cell.BasicLSTMCell(size),\
                   tf.nn.rnn_cell.BasicLSTMCell(size),\
