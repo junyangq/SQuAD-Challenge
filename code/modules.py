@@ -296,7 +296,7 @@ class CoAttn(object):
         self.key_vec_size = key_vec_size
         self.value_vec_size = value_vec_size
 
-    def build_graph(self, values, values_mask, keys):
+    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True):
         """
         Keys attend to values.
         For each key, return an attention distribution and an attention output vector.
@@ -346,11 +346,21 @@ class CoAttn(object):
             L = tf.matmul(D, Q) # shape (batch_size, num_keys, num_values)
 
             # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
-            A_D = tf.nn.softmax(tf.transpose(L, perm = [0, 2, 1]), dim = -1) #(batch_size, num_values, num_keys)
+            if use_mask:
+                A_D = masked_softmax(logits = tf.transpose(L, perm = [0, 2, 1]), mask = keys_mask, dim = -1)
+            else:
+                A_D = tf.nn.softmax(tf.transpose(L, perm = [0, 2, 1]), dim = -1) #(batch_size, num_values, num_keys)
+
             C2Q_Attn = tf.matmul(Q, A_D) # (batch_size, value_vec_size, num_keys)
 
             # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
-            A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
+            #A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
+            if use_mask:
+                A_Q = masked_softmax(logits = L, mask = values_mask, dim = -1)
+            else:
+                A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
+
+
             Q2C_Attn = tf.matmul(tf.transpose(D, perm = [0, 2, 1]), A_Q) # (batch_size, value_vec_size, num_values)
 
             # Compute second-level attention outputs S
