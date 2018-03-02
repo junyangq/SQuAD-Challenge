@@ -151,7 +151,7 @@ class DPDecoder(object):
             alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
             beta: Tensor shape (batch_size, context_len). Logits of end position for each word
         """
-        with vs.variable_scope("DPDecoder"):
+        with vs.variable_scope("DPDecoder", reuse=tf.AUTO_REUSE):
 
             h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
@@ -376,7 +376,7 @@ class CoAttn(object):
             # U, _ = bidirection_rnn(C_D, input_h, input_c)
 
             # U = tf.transpose(U, perm=[1, 0, 2])
-            
+
             (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
                 tf.nn.rnn_cell.BasicLSTMCell(size),\
                   tf.nn.rnn_cell.BasicLSTMCell(size),\
