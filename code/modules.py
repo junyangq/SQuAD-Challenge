@@ -329,7 +329,7 @@ class CoAttn(object):
             Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
 
             print('Q shape is: ', Q.shape)
-            Q = self.concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
+            Q = self.concat_sentinel('question_sentinel', Q)  # (batch_size, num_values, value_vec_size)
 
             # sentinel = tf.get_variable(name='question_sentinel', shape=tf.shape(Q)[2], \
             #     initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
@@ -338,7 +338,7 @@ class CoAttn(object):
 
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
-            D = self.concat_sentinel('document_sentinel', D, self.key_vec_size)
+            D = self.concat_sentinel('document_sentinel', D)
             ### Start your code here to implement 'Sentinel Vector'
 
             # key = document, value = question here
@@ -385,7 +385,7 @@ class CoAttn(object):
 
             return U
 
-    def concat_sentinel(self, sentinel_name, original_tensor, size):
+    def concat_sentinel(self, sentinel_name, original_tensor):
         '''
 
         Args:  
