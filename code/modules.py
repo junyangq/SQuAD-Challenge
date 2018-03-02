@@ -19,6 +19,7 @@ from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
 from tensorflow.contrib.cudnn_rnn.python.ops import cudnn_rnn_ops
+from tensorflow.python.client import device_lib
 
 
 class RNNEncoder(object):
@@ -99,7 +100,14 @@ class DPDecoder(object):
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.pool_size = pool_size
-        self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
+        local_device_protos = device_lib.list_local_devices()
+        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+            # Only NVidia GPU is supported for now
+            self.device = 'gpu'
+            self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
+        else:
+            self.device = 'cpu'
+            self.LSTM_dec = tf.nn.rnn_cell.BasicLSTMCell(self.hidden_size)
         
     
     def HMN(self, U, hi, us, ue, mask, scope):
@@ -298,6 +306,12 @@ class CoAttn(object):
         self.keep_prob = keep_prob
         self.key_vec_size = key_vec_size
         self.value_vec_size = value_vec_size
+        local_device_protos = device_lib.list_local_devices()
+        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+            # Only NVidia GPU is supported for now
+            self.device = 'gpu'
+        else:
+            self.device = 'cpu'
 
     def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True):
         """
@@ -352,6 +366,8 @@ class CoAttn(object):
             # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
             if use_mask:
                 keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(keys)[0], 1], dtype=tf.int32)], axis=1), 2)
+                print "keys_mask shape:", keys_mask.shape
+                print "L shape:", L.shape
                 _, A_D = masked_softmax(L, mask=keys_mask, dim=-1) #(batch_size, num_keys, num_values)
             else:
                 A_D = tf.nn.softmax(L, dim=-1)
@@ -361,6 +377,8 @@ class CoAttn(object):
             # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
             if use_mask:
                 values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(values)[0], 1], dtype=tf.int32)], axis=1), 2)
+                print "values_mask shape:", values_mask.shape
+                print "L shape:", L.shape
                 _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=values_mask, dim=-1) # (batch_size, num_keys, num_values)
             else:
                 A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=-1)
@@ -379,24 +397,27 @@ class CoAttn(object):
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
             
-            # bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
-            # C_D = tf.transpose(C_D, perm=[2, 0, 1])
-            # input_h = tf.zeros([1, tf.shape(values)[0], size])
-            # input_c = tf.zeros([1, tf.shape(values)[0], size])
-            
-            # U, _ = bidirection_rnn(C_D, input_h, input_c)
+            if self.device == 'gpu':
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                # C_D = tf.transpose(C_D, perm=[2, 0, 1])
+                print 'C_D shape', C_D.shape
+                input_h = tf.zeros([1, tf.shape(values)[0], size])
+                input_c = tf.zeros([1, tf.shape(values)[0], size])
+                params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(2*self.value_vec_size, size, 2)),
+                    initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+                
+                U, _, _ = bidirection_rnn(C_D, input_h, input_c, params)
 
-            # U = tf.transpose(U, perm=[1, 0, 2])
+                print 'U shape:', U.shape
+                # U = tf.transpose(U, perm=[1, 0, 2])
 
-            (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
-                tf.nn.rnn_cell.BasicLSTMCell(size),\
-                  tf.nn.rnn_cell.BasicLSTMCell(size),\
-                   C_D,\
-                   dtype = tf.float32)
-            print('u_fw_out shape is : ', u_fw_out.shape)
-            print('u_bw_out shape is : ', u_bw_out.shape)
+            else:
+                (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
+                    cell_fw=tf.nn.rnn_cell.BasicLSTMCell(size), cell_bw=tf.nn.rnn_cell.BasicLSTMCell(size), 
+                    inputs=C_D, dtype = tf.float32)
+                U = tf.concat([u_fw_out, u_bw_out], 2)
 
-            U = tf.concat([u_fw_out, u_bw_out], 2)
+            print 'U shape:', U.shape
             U = U[:,:-1, :]
             print('U shape is: ', U.shape)
 
@@ -448,3 +469,12 @@ def masked_softmax(logits, mask, dim):
     masked_logits = tf.add(logits, exp_mask) # where there's padding, set logits to -large
     prob_dist = tf.nn.softmax(masked_logits, dim)
     return masked_logits, prob_dist
+
+
+def estimate_cudnn_parameter_size(input_size, hidden_size, direction):
+    """
+    Compute the number of parameters needed to
+    construct a stack of LSTMs. 
+    """
+    single_rnn_size = 8 * hidden_size + 4 * (hidden_size * input_size) + 4 * (hidden_size * hidden_size)
+    return 2 * single_rnn_size
