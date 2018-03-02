@@ -326,49 +326,46 @@ class CoAttn(object):
 
             # Compute projected question hidden states
 
-            values_t = tf.reshape(values, shape = [-1, self.value_vec_size]) # of shape (batch_size * num_values, value_vec_size)
-            Q = tf.tanh(tf.reshape(tf.matmul(values_t, W), shape = [-1, values.shape[1], self.value_vec_size]) + tf.expand_dims(b, axis = 0)) #(batch_size, num_values, value_vec_size)
-            #values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            #Q = tf.tanh(tf.matmul(W, values_t) + b) # (batch_size, value_vec_size, num_values)
+            Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
 
             print('Q shape is: ', Q.shape)
-            Q = self.concat_sentinel('question_sentinel', Q)
-            Q = tf.transpose(Q, perm = [0, 2, 1]) #(batch_size, value_vec_size, num_values)
+            Q = self.concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
+
+            # sentinel = tf.get_variable(name='question_sentinel', shape=tf.shape(Q)[2], \
+            #     initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
+            # sentinel = tf.tile(sentinel, [tf.shape(original_tensor)[0], 1, 1])
+            # concat_tensor = tf.concat([original_tensor, sentinel], 2)
 
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
-            D = self.concat_sentinel('document_sentinel', D)
+            D = self.concat_sentinel('document_sentinel', D, self.key_vec_size)
             ### Start your code here to implement 'Sentinel Vector'
 
-
+            # key = document, value = question here
             ### End your code here to implement 'Sentinel Vector'
             # Compute affinity matrix L
-            L = tf.matmul(D, Q) # shape (batch_size, num_keys, num_values)
+            L = tf.matmul(D, tf.transpose(Q, perm=[0, 2, 1])) # shape (batch_size, num_keys, num_values)
 
             # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
             if use_mask:
-                A_D = masked_softmax(logits = tf.transpose(L, perm = [0, 2, 1]), mask = keys_mask, dim = 1)
+                A_D = masked_softmax(L, mask=keys_mask, dim=-1) #(batch_size, num_keys, num_values)
             else:
-                A_D = tf.nn.softmax(tf.transpose(L, perm = [0, 2, 1]), dim = 1) #(batch_size, num_values, num_keys)
-
-            C2Q_Attn = tf.matmul(Q, A_D) # (batch_size, value_vec_size, num_keys)
+                A_D = tf.nn.softmax(L, dim=-1)
+            C2Q_Attn = tf.matmul(A_D, Q) # (batch_size, num_keys, value_vec_size)
 
             # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
-            #A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
             if use_mask:
-                A_Q = masked_softmax(logits = L, mask = values_mask, dim = 1)
+                A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=values_mask, dim=-1) # (batch_size, num_keys, num_values)
             else:
-                A_Q = tf.nn.softmax(L, dim = 1) # (batch_size, num_keys, num_values)
-
-
-            Q2C_Attn = tf.matmul(tf.transpose(D, perm = [0, 2, 1]), A_Q) # (batch_size, value_vec_size, num_values)
+                A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=-1)
+            Q2C_Attn = tf.matmul(A_Q, D) # (batch_size, num_values, key_vec_size)
 
             # Compute second-level attention outputs S
-            S = tf.matmul(Q2C_Attn, A_D) # (batch_size, value_vec_size, num_keys)
+            S = tf.matmul(A_D, Q2C_Attn) # (batch_size, num_keys, value_vec_size)
             print('S size is: ', S.shape)
 
             # Concatenate C2Q_Attn and S:
-            C_D = tf.transpose(tf.concat([C2Q_Attn, S], 1), perm = [0, 2, 1] ) # (batch_size, 2 * value_vec_size, num_keys)
+            C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
             print('co_context size is: ', C_D.shape)
 
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
@@ -383,12 +380,12 @@ class CoAttn(object):
             print('u_bw_out shape is : ', u_bw_out.shape)
 
             U = tf.concat([u_fw_out, u_bw_out], 2)
-            U = U[:,1:, :]
+            U = U[:,:-1, :]
             print('U shape is: ', U.shape)
 
             return U
 
-    def concat_sentinel(self, sentinel_name, original_tensor):
+    def concat_sentinel(self, sentinel_name, original_tensor, size):
         '''
 
         Args:  
@@ -399,11 +396,10 @@ class CoAttn(object):
 
         '''
 
-        sentinel = tf.get_variable(name = sentinel_name, shape = original_tensor.get_shape()[2], \
-            initializer = tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
-        sentinel = tf.reshape(sentinel, (1, 1, -1))
-        sentinel = tf.tile(sentinel, (tf.shape(original_tensor)[0], 1, 1))
-        concat_tensor = tf.concat([sentinel, original_tensor], 1)
+        sentinel = tf.get_variable(name=sentinel_name, shape=(size),
+            initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
+        sentinel = tf.tile(tf.reshape(sentinel, [1, 1, -1]), [tf.shape(original_tensor)[0], 1, 1])
+        concat_tensor = tf.concat([original_tensor, sentinel], 1)
         print('the shape of concat tensor is: ', concat_tensor.get_shape())
         return concat_tensor
 
