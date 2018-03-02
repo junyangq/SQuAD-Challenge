@@ -80,77 +80,99 @@ class RNNEncoder(object):
 
 class DPDecoder(object):
     """
-    TODO: MODIFY THE COMMENT!
+    Dynamic Pointing Decoder with Highway Maxout Network (HMN)
 
-    General-purpose module to encode a sequence using a RNN.
-    It feeds the input through a RNN and returns all the hidden states.
-
-    Note: In lecture 8, we talked about how you might use a RNN as an "encoder"
-    to get a single, fixed size vector representation of a sequence
-    (e.g. by taking element-wise max of hidden states).
-    Here, we're using the RNN as an "encoder" but we're not taking max;
-    we're just returning all the hidden states. The terminology "encoder"
-    still applies because we're getting a different "encoding" of each
-    position in the sequence, and we'll use the encodings downstream in the model.
-
-    This code uses a bidirectional GRU, but you could experiment with other types of RNN.
     """
 
-    def __init__(self, hidden_size, keep_prob, num_iterations):
+    def __init__(self, keep_prob, num_iterations, context_len, hidden_size, pool_size):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
+          m: flag.context_length
+          l: 2*flag.hidden_size=value_vec_size=400
+          p: pool_size
           keep_prob: Tensor containing a single scalar that is the keep probability (for dropout)
         """
-        self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.num_iterations = num_iterations
-        self.LSTM_dec = tf.nn.rnn_cell.LSTMCell(hidden_size)
-        # self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
-        # self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        # self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
-        # self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
+        self.context_len = context_len
+        self.hidden_size = hidden_size
+        self.pool_size = pool_size
+        self.LSTM_dec = tf.contrib.rnn.BasicLSTMCell(self.hidden_size)
+        
+    
+    def HMN(self, U, hi, us, ue, scope):
+      '''
+      Inputs:
+        U: batch * m * 2l
+      '''
+      with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+        xavier = tf.contrib.layers.xavier_initializer()
+        W11 = tf.get_variable('W11',shape=[self.pool_size, self.hidden_size, 2*self.hidden_size], initializer=xavier, dtype=tf.float32)
+        W12 = tf.get_variable('W12',shape=[self.pool_size, self.hidden_size, self.hidden_size], initializer=xavier, dtype=tf.float32)
+        W2 = tf.get_variable('W2',shape=[self.pool_size, self.hidden_size, self.hidden_size], initializer=xavier, dtype=tf.float32)
+        W3 = tf.get_variable('W3',shape=[self.pool_size, 1, 2*self.hidden_size], initializer=xavier, dtype=tf.float32)
+        WD = tf.get_variable('WD',shape=[self.hidden_size, 5*self.hidden_size], initializer=xavier, dtype=tf.float32)
+        b1 = tf.get_variable('b1',shape=[self.pool_size, self.hidden_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
+        b2 = tf.get_variable('b2',shape=[self.pool_size, self.hidden_size],initializer=tf.zeros_initializer(),dtype=tf.float32)
+        b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
+
+      concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
+      
+      r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
+
+      Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
+
+      Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
+      Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+      mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
+
+      Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+      mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+
+      concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
+      Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
+      out = tf.reduce_max(Z3, 2)  # out: (B * m)
+
+      return out
+
+
+    
 
     def build_graph(self, U):
         """
         Inputs:
-          inputs: Tensor shape (batch_size, seq_len, input_size)
-          masks: Tensor shape (batch_size, seq_len).
-            Has 1s where there is real input, 0s where there's padding.
-            This is used to make sure tf.nn.bidirectional_dynamic_rnn doesn't iterate through masked steps.
+          U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
 
         Returns:
-          out: Tensor shape (batch_size, seq_len, hidden_size*2).
-            This is all hidden states (fw and bw hidden states are concatenated).
+          out:
+            alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
+            beta: Tensor shape (batch_size, context_len). Logits of end position for each word
         """
         with vs.variable_scope("DPDecoder"):
 
-            # input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
+            h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
-            # Note: fw_out and bw_out are the hidden states for every timestep.
-            # Each is shape (batch_size, seq_len, hidden_size).
-
-            initial_state = tf.get_variable("initial_state", shape=(hidden_size), dtype=tf.float32)
-
-            hidden = tf.reshape(tf.tile(initial_state, multiples=tf.shape(U)[0]), [-1, hidden_size])
-            s = start_pos
-            e = end_pos
+            # s = start_pos
+            s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
+            # e = end_pos
+            e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
             for _ in range(self.num_iterations):
-                hidden = self.LSTM_dec(tf.concat([U[:,s], U[:,e]], 1), hidden)
-                alpha = self.HMN_start(U, hidden, s, e)
-                beta = self.HMN_end(U, hidden, s, e)
-                s = tf.argmax(alpha, axis=1)
-                e = tf.argmax(beta, axis=1)
+                idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
+                s_stk = tf.stack([idx, s], axis=1)
+                e_stk = tf.stack([idx, e], axis=1)
+                Us = tf.gather_nd(U, s_stk)
+                Ue = tf.gather_nd(U, e_stk)
+                _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
+                hidden = h_state[0]
+                alpha = self.HMN(U, hidden, Us, Ue, scope="start")
+                beta = self.HMN(U, hidden, Us, Ue, scope="end")
+                print 'alpha shape: ', alpha.shape
+                s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
+                e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
 
-            # (fw_out, bw_out), _ = tf.nn.dynamic_rnn(self.lstm_cell, inputs, input_lens, dtype=tf.float32)
+            return alpha, beta  # alpha: (B * m), beta: (B * m)
 
-            # # Concatenate the forward and backward hidden states
-            # out = tf.concat([fw_out, bw_out], 2)
-
-            # # Apply dropout
-            # out = tf.nn.dropout(out, self.keep_prob)
-
-            return s, e
 
 
 class SimpleSoftmaxLayer(object):
@@ -254,13 +276,10 @@ class BasicAttn(object):
 
 class CoAttn(object):
     """Module for basic attention.
-
     Note: in this module we use the terminology of "keys" and "values" (see lectures).
     In the terminology of "X attends to Y", "keys attend to values".
-
     In the baseline model, the keys are the context hidden states
     and the values are the question hidden states.
-
     We choose to use general terminology of keys and values in this module
     (rather than context and question) to avoid confusion if you reuse this
     module with other inputs.
@@ -281,13 +300,11 @@ class CoAttn(object):
         """
         Keys attend to values.
         For each key, return an attention distribution and an attention output vector.
-
         Inputs:
           values: Tensor shape (batch_size, num_values, value_vec_size).
           values_mask: Tensor shape (batch_size, num_values).
             1s where there's real input, 0s where there's padding
           keys: Tensor shape (batch_size, num_keys, value_vec_size)
-
         Outputs:
           attn_dist: Tensor shape (batch_size, num_keys, num_values).
             For each key, the distribution should sum to 1,
@@ -378,6 +395,7 @@ class CoAttn(object):
         concat_tensor = tf.concat([sentinel, original_tensor], 1)
         print('the shape of concat tensor is: ', concat_tensor.get_shape())
         return concat_tensor
+
 
 
 
