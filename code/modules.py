@@ -389,7 +389,8 @@ class CoAttn(object):
 
         '''
 
-        sentinel = tf.get_variable(sentinel_name, original_tensor.get_shape()[2], tf.float32)
+        sentinel = tf.get_variable(name = sentinel_name, shape = original_tensor.get_shape()[2], \
+            initializer = tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
         sentinel = tf.reshape(sentinel, (1, 1, -1))
         sentinel = tf.tile(sentinel, (tf.shape(original_tensor)[0], 1, 1))
         concat_tensor = tf.concat([sentinel, original_tensor], 1)
