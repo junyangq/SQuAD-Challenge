@@ -18,6 +18,7 @@ import tensorflow as tf
 from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
+from tensorflow.contrib.cudnn_rnn.python.ops import cudnn_rnn_ops
 
 
 class RNNEncoder(object):
@@ -98,7 +99,7 @@ class DPDecoder(object):
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.pool_size = pool_size
-        self.LSTM_dec = tf.contrib.rnn.BasicLSTMCell(self.hidden_size)
+        self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
         
     
     def HMN(self, U, hi, us, ue, mask, scope):
@@ -150,7 +151,7 @@ class DPDecoder(object):
             alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
             beta: Tensor shape (batch_size, context_len). Logits of end position for each word
         """
-        with vs.variable_scope("DPDecoder"):
+        with vs.variable_scope("DPDecoder", reuse=tf.AUTO_REUSE):
 
             h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
@@ -366,6 +367,16 @@ class CoAttn(object):
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
+            
+            # bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+            # C_D = tf.transpose(C_D, perm=[2, 0, 1])
+            # input_h = tf.zeros([1, tf.shape(values)[0], size])
+            # input_c = tf.zeros([1, tf.shape(values)[0], size])
+            
+            # U, _ = bidirection_rnn(C_D, input_h, input_c)
+
+            # U = tf.transpose(U, perm=[1, 0, 2])
+
             (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
                 tf.nn.rnn_cell.BasicLSTMCell(size),\
                   tf.nn.rnn_cell.BasicLSTMCell(size),\
