@@ -18,6 +18,7 @@ import tensorflow as tf
 from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
+from tensorflow.contrib.cudnn_rnn.python.ops import cudnn_rnn_ops
 
 
 class RNNEncoder(object):
@@ -98,7 +99,7 @@ class DPDecoder(object):
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.pool_size = pool_size
-        self.LSTM_dec = tf.contrib.rnn.BasicLSTMCell(self.hidden_size)
+        self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
         
     
     def HMN(self, U, hi, us, ue, mask, scope):
