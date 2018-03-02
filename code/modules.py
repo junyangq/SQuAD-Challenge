@@ -239,19 +239,15 @@ class BasicAttn(object):
             (using the attention distribution as weights).
         """
         with vs.variable_scope("BasicAttn"):
-
             # Calculate attention distribution
             values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
             attn_logits = tf.matmul(keys, values_t) # shape (batch_size, num_keys, num_values)
             attn_logits_mask = tf.expand_dims(values_mask, 1) # shape (batch_size, 1, num_values)
             _, attn_dist = masked_softmax(attn_logits, attn_logits_mask, 2) # shape (batch_size, num_keys, num_values). take softmax over values
-
             # Use attention distribution to take weighted sum of values
             output = tf.matmul(attn_dist, values) # shape (batch_size, num_keys, value_vec_size)
-
             # Apply dropout
             output = tf.nn.dropout(output, self.keep_prob)
-
             return attn_dist, output
 
 
@@ -319,14 +315,16 @@ class CoAttn(object):
             #Q = tf.tanh(tf.matmul(W, values_t) + b) # (batch_size, value_vec_size, num_values)
 
             print('Q shape is: ', Q.shape)
+            Q = self.concat_sentinel('question_sentinel', Q)
             Q = tf.transpose(Q, perm = [0, 2, 1]) #(batch_size, value_vec_size, num_values)
+
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
+            D = self.concat_sentinel('document_sentinel', D)
             ### Start your code here to implement 'Sentinel Vector'
 
 
             ### End your code here to implement 'Sentinel Vector'
-
             # Compute affinity matrix L
             L = tf.matmul(D, Q) # shape (batch_size, num_keys, num_values)
 
@@ -338,24 +336,16 @@ class CoAttn(object):
             A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
             Q2C_Attn = tf.matmul(tf.transpose(D, perm = [0, 2, 1]), A_Q) # (batch_size, value_vec_size, num_values)
 
-
             # Compute second-level attention outputs S
             S = tf.matmul(Q2C_Attn, A_D) # (batch_size, value_vec_size, num_keys)
-
             print('S size is: ', S.shape)
 
             # Concatenate C2Q_Attn and S:
             C_D = tf.transpose(tf.concat([C2Q_Attn, S], 1), perm = [0, 2, 1] ) # (batch_size, 2 * value_vec_size, num_keys)
-
             print('co_context size is: ', C_D.shape)
-
-
-
 
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
             # print('co_input size is: ', co_input.shape)
-
-
             size = int(self.value_vec_size)
             (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
                 tf.nn.rnn_cell.BasicLSTMCell(size),\
@@ -366,12 +356,28 @@ class CoAttn(object):
             print('u_bw_out shape is : ', u_bw_out.shape)
 
             U = tf.concat([u_fw_out, u_bw_out], 2)
-
+            U = U[:,1:, :]
             print('U shape is: ', U.shape)
-
 
             return U
 
+    def concat_sentinel(self, sentinel_name, original_tensor):
+        '''
+
+        Args:  
+            sentinel_name: Variable name of sentinel.  # string
+            original_tensor: Tensor of rank 3 to left concatenate sentinel to. # of shape (batch_size, num_values, value_vec_size)
+        Returns:  
+            original_tensor with sentinel. 
+
+        '''
+
+        sentinel = tf.get_variable(sentinel_name, original_tensor.get_shape()[2], tf.float32)
+        sentinel = tf.reshape(sentinel, (1, 1, -1))
+        sentinel = tf.tile(sentinel, (tf.shape(original_tensor)[0], 1, 1))
+        concat_tensor = tf.concat([sentinel, original_tensor], 1)
+        print('the shape of concat tensor is: ', concat_tensor.get_shape())
+        return concat_tensor
 
 
 
