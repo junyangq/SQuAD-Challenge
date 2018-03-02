@@ -101,7 +101,7 @@ class DPDecoder(object):
         self.LSTM_dec = tf.contrib.rnn.BasicLSTMCell(self.hidden_size)
         
     
-    def HMN(self, U, hi, us, ue, scope):
+    def HMN(self, U, hi, us, ue, mask, scope):
       '''
       Inputs:
         U: batch * m * 2l
@@ -117,32 +117,33 @@ class DPDecoder(object):
         b2 = tf.get_variable('b2',shape=[self.pool_size, self.hidden_size],initializer=tf.zeros_initializer(),dtype=tf.float32)
         b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
 
-      concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
+        concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
       
-      r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
+        r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
 
-      Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
+        Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
-      Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
-      Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
-      mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
+        Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
+        Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+        mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
 
-      Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
-      mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+        Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+        mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
 
-      concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
-      Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-      out = tf.reduce_max(Z3, 2)  # out: (B * m)
+        concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
+        Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
+        logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
-      return out
+      return masked_softmax(logits, mask, 1)
 
 
     
 
-    def build_graph(self, U):
+    def build_graph(self, U, context_mask):
         """
         Inputs:
           U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
+          context_mask: Tensor shape (batch_size, context_len). 1s where there's real input, 0s where there's padding
 
         Returns:
           out:
@@ -165,13 +166,14 @@ class DPDecoder(object):
                 Ue = tf.gather_nd(U, e_stk)
                 _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 hidden = h_state[0]
-                alpha = self.HMN(U, hidden, Us, Ue, scope="start")
-                beta = self.HMN(U, hidden, Us, Ue, scope="end")
+                alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
+                beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
+
                 print 'alpha shape: ', alpha.shape
                 s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
                 e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
 
-            return alpha, beta  # alpha: (B * m), beta: (B * m)
+            return alpha, beta, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 

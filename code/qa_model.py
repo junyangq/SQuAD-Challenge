@@ -168,7 +168,7 @@ class QAModel(object):
 
         elif self.FLAGS.decoder == "DPD":
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
-            self.logits_start, self.logits_end = decoder.build_graph(attn_output)
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask)
 
         else:
             raise Exception("Decoder %s not supported." % self.FLAGS.decoder)
