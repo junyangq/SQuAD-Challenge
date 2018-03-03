@@ -399,17 +399,17 @@ class CoAttn(object):
             
             if self.device == 'gpu':
                 bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
-                # C_D = tf.transpose(C_D, perm=[2, 0, 1])
+                C_D = tf.transpose(C_D, perm=[1, 0, 2])
                 print 'C_D shape', C_D.shape
-                input_h = tf.zeros([1, tf.shape(values)[0], size])
-                input_c = tf.zeros([1, tf.shape(values)[0], size])
+                input_h = tf.zeros([2, tf.shape(values)[0], size])
+                input_c = tf.zeros([2, tf.shape(values)[0], size])
                 params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(2*self.value_vec_size, size, 2)),
                     initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
                 
                 U, _, _ = bidirection_rnn(C_D, input_h, input_c, params)
 
                 print 'U shape:', U.shape
-                # U = tf.transpose(U, perm=[1, 0, 2])
+                U = tf.transpose(U, perm=[1, 0, 2])
 
             else:
                 (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
