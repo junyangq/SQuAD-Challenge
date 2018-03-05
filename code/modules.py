@@ -320,7 +320,7 @@ class CoAttn(object):
         else:
             self.device = 'cpu'
 
-    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=False, sentinel=False):
+    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True, sentinel=False):
 
         """
         Keys attend to values.
@@ -373,6 +373,8 @@ class CoAttn(object):
 
             # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
             if use_mask:
+                print('tf.shape(values)[0] is: ', tf.shape(values)[0])
+                print('tf.ones([tf.shape(values)[0], 1] is ', tf.ones([tf.shape(values)[0], 1], dtype=tf.int32))
                 values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(values)[0], 1], dtype=tf.int32)], axis=1), 1)
                 print "value_mask shape:", values_mask.shape
                 print "L shape:", L.shape
@@ -465,7 +467,7 @@ class DCNplusEncoder(object):
         else:
             self.device = 'cpu'
 
-    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=False, sentinel=True):
+    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True, sentinel=True):
 
         """
         Keys attend to values.
@@ -508,7 +510,7 @@ class DCNplusEncoder(object):
 
         with vs.variable_scope("coattention_layer_1"):
             S_D_1, S_Q_1, C_D_1 = coattention(\
-                Q, Q_length, D, D_length, values_mask, keys_mask, use_mask=False)
+                Q, Q_length, D, D_length, values_mask, keys_mask, use_mask)
 
         with vs.variable_scope('encode_summaries_from_coattention_layer_1'):
 
@@ -537,9 +539,8 @@ class DCNplusEncoder(object):
 
         with vs.variable_scope('coattention_layer_2'):
             S_D_2, S_Q_2, C_D_2 = coattention(\
-                E_Q_2, Q_length, E_D_2, D_length, values_mask, keys_mask, use_mask=False)
-
-            
+                E_Q_2, Q_length, E_D_2, D_length, values_mask, keys_mask, use_mask)
+ 
 
         with vs.variable_scope('final_encoder'):
             document_representations = tf.concat(\
@@ -602,16 +603,22 @@ def coattention(Q, Q_length, D, D_length, Q_mask, D_mask, use_mask=False):
     print('L shape is :', L.shape)
     # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
     if use_mask:
-        Q_mask = tf.expand_dims(tf.concat([Q_mask, tf.ones([Q_length, 1], dtype=tf.int32)], axis=1), 1)
-        _, A_D = masked_softmax(L, mask=Q, dim=2) #(batch_size, num_keys, num_values)
+        print('Q_mask dimension is: ', Q_mask.shape)
+
+        Q_mask = tf.expand_dims(tf.concat([Q_mask, tf.ones([tf.shape(Q)[0], 1], dtype=tf.int32)], axis=1), 1)
+
+
+        print('Q_mask dimension is: ', Q_mask.shape)
+        _, A_D = masked_softmax(L, mask=Q_mask, dim=2) #(N, D, Q)
+        print('A_D shape after mask is, ', A_D.shape)
     else:
         A_D = tf.nn.softmax(L, dim=-1)
-    S_D = tf.matmul(A_D, Q) # (batch_size, num_keys, value_vec_size)
+    S_D = tf.matmul(A_D, Q) # (N, D, 2H)
     print('***S_D shape is ', S_D.shape)
     # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
     if use_mask:
-        D_mask = tf.expand_dims(tf.concat([D_mask, tf.ones([D_length, 1], dtype=tf.int32)], axis=1), 1)
-        _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (batch_size, num_keys, num_values)
+        D_mask = tf.expand_dims(tf.concat([D_mask, tf.ones([tf.shape(D)[0], 1], dtype=tf.int32)], axis=1), 1)
+        _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=D_mask, dim=-1) # (batch_size, num_keys, num_values)
     else:
         A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
     S_Q = tf.matmul(A_Q, D) # (batch_size, num_values, key_vec_size)
@@ -621,10 +628,6 @@ def coattention(Q, Q_length, D, D_length, Q_mask, D_mask, use_mask=False):
     print('***C_D size is: ', C_D.shape)
 
     return S_D, S_Q, C_D
-
-
-
-
 
 
 def masked_softmax(logits, mask, dim):
