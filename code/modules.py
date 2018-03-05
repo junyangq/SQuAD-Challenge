@@ -133,10 +133,13 @@ class DPDecoder(object):
         Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
         Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
+
         Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
@@ -167,7 +170,9 @@ class DPDecoder(object):
             s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
             # e = end_pos
             e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
-            for _ in range(self.num_iterations):
+            alphas = [None] * self.num_iterations
+            betas = [None] * self.num_iterations
+            for i in range(self.num_iterations):
                 idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
                 s_stk = tf.stack([idx, s], axis=1)
                 e_stk = tf.stack([idx, e], axis=1)
@@ -177,12 +182,13 @@ class DPDecoder(object):
                 hidden = h_state[0]
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
+                alphas[i] = alpha
+                betas[i] = beta
 
-                print 'alpha shape: ', alpha.shape
                 s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
                 e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
 
-            return alpha, beta, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
+            return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 
