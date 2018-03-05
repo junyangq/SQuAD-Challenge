@@ -135,13 +135,16 @@ class DPDecoder(object):
         Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
         Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
+	mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+	mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-        logits = tf.reduce_max(Z3, 2)  # out: (B * m)
+        Z3 = tf.nn.dropout(Z3, self.keep_prob)
+	logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
       return masked_softmax(logits, mask, 1)
 
@@ -175,6 +178,7 @@ class DPDecoder(object):
                 Ue = tf.gather_nd(U, e_stk)
                 _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 hidden = h_state[0]
+		hidden = tf.nn.dropout(hidden, self.keep_prob)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
 
@@ -356,7 +360,6 @@ class CoAttn(object):
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
             D = self.concat_sentinel('document_sentinel', D, self.value_vec_size)
-            ### Start your code here to implement 'Sentinel Vector'
 
             # key = document, value = question here
             ### End your code here to implement 'Sentinel Vector'
@@ -365,10 +368,10 @@ class CoAttn(object):
 
             # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
             if use_mask:
-                keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(keys)[0], 1], dtype=tf.int32)], axis=1), 2)
-                print "keys_mask shape:", keys_mask.shape
+                values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(values)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "value_mask shape:", values_mask.shape
                 print "L shape:", L.shape
-                _, A_D = masked_softmax(L, mask=keys_mask, dim=-1) #(batch_size, num_keys, num_values)
+                _, A_D = masked_softmax(L, mask=values_mask, dim=2) #(batch_size, num_keys, num_values)
             else:
                 A_D = tf.nn.softmax(L, dim=-1)
 
@@ -376,12 +379,12 @@ class CoAttn(object):
 
             # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
             if use_mask:
-                values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(values)[0], 1], dtype=tf.int32)], axis=1), 2)
-                print "values_mask shape:", values_mask.shape
+                keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(keys)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "key_mask shape:", keys_mask.shape
                 print "L shape:", L.shape
-                _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=values_mask, dim=-1) # (batch_size, num_keys, num_values)
+                _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (batch_size, num_keys, num_values)
             else:
-                A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=-1)
+                A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
 
             Q2C_Attn = tf.matmul(A_Q, D) # (batch_size, num_values, key_vec_size)
 
@@ -391,8 +394,9 @@ class CoAttn(object):
 
             # Concatenate C2Q_Attn and S:
             C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
+	    C_D = tf.nn.dropout(C_D, self.keep_prob)
             print('co_context size is: ', C_D.shape)
-
+	    
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
@@ -419,8 +423,9 @@ class CoAttn(object):
 
             print 'U shape:', U.shape
             U = U[:,:-1, :]
+	    U=tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
-
+	
             return U
 
     def concat_sentinel(self, sentinel_name, original_tensor, size):
