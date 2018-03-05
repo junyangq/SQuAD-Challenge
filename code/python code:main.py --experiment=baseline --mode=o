@@ -1,0 +1,16 @@
+python code/main.py --experiment=baseline --mode=official_eval \
+--json_in_path=data/tiny-dev.json \
+--ckpt_load_dir=experiments/baseline/best_checkpoint
+
+
+cl run --name gen-answers --request-docker-image abisee/cs224n-dfp:v4 \
+:code :best_checkpoint glove.txt:0x97c870/glove.6B.100d.txt data.json:0x4870af \
+'python code/main.py --experiment=baseline --mode=official_eval \
+--glove_path=glove.txt --json_in_path=data.json --ckpt_load_dir=best_checkpoint'
+
+
+
+
+cl edit gen-answers -T cs224n-win18-dev --description "baseline trial"
+
+ssh -N -f -L localhost:1200:localhost:5678 224dcnp@13.84.177.178

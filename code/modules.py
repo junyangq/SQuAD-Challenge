@@ -18,6 +18,8 @@ import tensorflow as tf
 from tensorflow.python.ops.rnn_cell import DropoutWrapper
 from tensorflow.python.ops import variable_scope as vs
 from tensorflow.python.ops import rnn_cell
+from tensorflow.contrib.cudnn_rnn.python.ops import cudnn_rnn_ops
+from tensorflow.python.client import device_lib
 
 
 class RNNEncoder(object):
@@ -98,10 +100,17 @@ class DPDecoder(object):
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.pool_size = pool_size
-        self.LSTM_dec = tf.contrib.rnn.BasicLSTMCell(self.hidden_size)
+        local_device_protos = device_lib.list_local_devices()
+        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+            # Only NVidia GPU is supported for now
+            self.device = 'gpu'
+            self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
+        else:
+            self.device = 'cpu'
+            self.LSTM_dec = tf.nn.rnn_cell.BasicLSTMCell(self.hidden_size)
         
     
-    def HMN(self, U, hi, us, ue, scope):
+    def HMN(self, U, hi, us, ue, mask, scope):
       '''
       Inputs:
         U: batch * m * 2l
@@ -117,39 +126,43 @@ class DPDecoder(object):
         b2 = tf.get_variable('b2',shape=[self.pool_size, self.hidden_size],initializer=tf.zeros_initializer(),dtype=tf.float32)
         b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
 
-      concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
+        concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
       
-      r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
+        r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
 
-      Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
+        Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
-      Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
-      Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
-      mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
+        Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
+        Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+        mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
+        #mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
-      Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
-      mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+        Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+        mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+        #mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
-      concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
-      Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-      out = tf.reduce_max(Z3, 2)  # out: (B * m)
+        concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
+        Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
+        #Z3 = tf.nn.dropout(Z3, self.keep_prob)
+        logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
-      return out
+        return masked_softmax(logits, mask, 1)
 
 
     
 
-    def build_graph(self, U):
+    def build_graph(self, U, context_mask):
         """
         Inputs:
           U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
+          context_mask: Tensor shape (batch_size, context_len). 1s where there's real input, 0s where there's padding
 
         Returns:
           out:
             alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
             beta: Tensor shape (batch_size, context_len). Logits of end position for each word
         """
-        with vs.variable_scope("DPDecoder"):
+        with vs.variable_scope("DPDecoder", reuse=tf.AUTO_REUSE):
 
             h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
@@ -165,13 +178,15 @@ class DPDecoder(object):
                 Ue = tf.gather_nd(U, e_stk)
                 _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 hidden = h_state[0]
-                alpha = self.HMN(U, hidden, Us, Ue, scope="start")
-                beta = self.HMN(U, hidden, Us, Ue, scope="end")
+                #hidden = tf.nn.dropout(hidden, self.keep_prob)
+                alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
+                beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
+
                 print 'alpha shape: ', alpha.shape
                 s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
                 e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
 
-            return alpha, beta  # alpha: (B * m), beta: (B * m)
+            return alpha, beta, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 
@@ -274,6 +289,9 @@ class BasicAttn(object):
 
 
 
+
+
+
 class CoAttn(object):
     """Module for basic attention.
     Note: in this module we use the terminology of "keys" and "values" (see lectures).
@@ -295,8 +313,15 @@ class CoAttn(object):
         self.keep_prob = keep_prob
         self.key_vec_size = key_vec_size
         self.value_vec_size = value_vec_size
+        local_device_protos = device_lib.list_local_devices()
+        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+            # Only NVidia GPU is supported for now
+            self.device = 'gpu'
+        else:
+            self.device = 'cpu'
 
-    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True):
+    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=False, sentinel=False):
+
         """
         Keys attend to values.
         For each key, return an attention distribution and an attention output vector.
@@ -313,6 +338,7 @@ class CoAttn(object):
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
         """
+
         with vs.variable_scope("CoAttn"):
 
             print('value_vec_size is: ', self.value_vec_size)
@@ -326,86 +352,394 @@ class CoAttn(object):
 
             # Compute projected question hidden states
 
-            values_t = tf.reshape(values, shape = [-1, self.value_vec_size]) # of shape (batch_size * num_values, value_vec_size)
-            Q = tf.tanh(tf.reshape(tf.matmul(values_t, W), shape = [-1, values.shape[1], self.value_vec_size]) + tf.expand_dims(b, axis = 0)) #(batch_size, num_values, value_vec_size)
-            #values_t = tf.transpose(values, perm=[0, 2, 1]) # (batch_size, value_vec_size, num_values)
-            #Q = tf.tanh(tf.matmul(W, values_t) + b) # (batch_size, value_vec_size, num_values)
+            Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
 
             print('Q shape is: ', Q.shape)
-            Q = self.concat_sentinel('question_sentinel', Q)
-            Q = tf.transpose(Q, perm = [0, 2, 1]) #(batch_size, value_vec_size, num_values)
+            Q = self.concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
+
+            # sentinel = tf.get_variable(name='question_sentinel', shape=tf.shape(Q)[2], \
+            #     initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
+            # sentinel = tf.tile(sentinel, [tf.shape(original_tensor)[0], 1, 1])
+            # concat_tensor = tf.concat([original_tensor, sentinel], 2)
 
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
-            D = self.concat_sentinel('document_sentinel', D)
-            ### Start your code here to implement 'Sentinel Vector'
+            D = self.concat_sentinel('document_sentinel', D, self.value_vec_size)
 
-
+            # key = document, value = question here
             ### End your code here to implement 'Sentinel Vector'
             # Compute affinity matrix L
-            L = tf.matmul(D, Q) # shape (batch_size, num_keys, num_values)
+            L = tf.matmul(D, tf.transpose(Q, perm=[0, 2, 1])) # shape (batch_size, num_keys, num_values)
 
             # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
             if use_mask:
-                A_D = masked_softmax(logits = tf.transpose(L, perm = [0, 2, 1]), mask = keys_mask, dim = 1)
+                values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(values)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "value_mask shape:", values_mask.shape
+                print "L shape:", L.shape
+                _, A_D = masked_softmax(L, mask=values_mask, dim=2) #(batch_size, num_keys, num_values)
             else:
-                A_D = tf.nn.softmax(tf.transpose(L, perm = [0, 2, 1]), dim = 1) #(batch_size, num_values, num_keys)
+                A_D = tf.nn.softmax(L, dim=-1)
 
-            C2Q_Attn = tf.matmul(Q, A_D) # (batch_size, value_vec_size, num_keys)
+            C2Q_Attn = tf.matmul(A_D, Q) # (batch_size, num_keys, value_vec_size)
+            print('C2Q_Attn shapeis ', C2Q_Attn.shape)
 
             # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
-            #A_Q = tf.nn.softmax(L, dim = -1) # (batch_size, num_keys, num_values)
             if use_mask:
-                A_Q = masked_softmax(logits = L, mask = values_mask, dim = 1)
+                keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(keys)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "key_mask shape:", keys_mask.shape
+                print "L shape:", L.shape
+                _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (batch_size, num_keys, num_values)
             else:
-                A_Q = tf.nn.softmax(L, dim = 1) # (batch_size, num_keys, num_values)
+                A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
 
-
-            Q2C_Attn = tf.matmul(tf.transpose(D, perm = [0, 2, 1]), A_Q) # (batch_size, value_vec_size, num_values)
+            Q2C_Attn = tf.matmul(A_Q, D) # (batch_size, num_values, key_vec_size)
+            print('Q2C_Attn shapeis ', Q2C_Attn.shape)
 
             # Compute second-level attention outputs S
-            S = tf.matmul(Q2C_Attn, A_D) # (batch_size, value_vec_size, num_keys)
+            S = tf.matmul(A_D, Q2C_Attn) # (batch_size, num_keys, value_vec_size)
             print('S size is: ', S.shape)
 
             # Concatenate C2Q_Attn and S:
-            C_D = tf.transpose(tf.concat([C2Q_Attn, S], 1), perm = [0, 2, 1] ) # (batch_size, 2 * value_vec_size, num_keys)
+            C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
+            C_D = tf.nn.dropout(C_D, self.keep_prob)
             print('co_context size is: ', C_D.shape)
-
+        
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
-            (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(\
-                tf.nn.rnn_cell.BasicLSTMCell(size),\
-                  tf.nn.rnn_cell.BasicLSTMCell(size),\
-                   C_D,\
-                   dtype = tf.float32)
-            print('u_fw_out shape is : ', u_fw_out.shape)
-            print('u_bw_out shape is : ', u_bw_out.shape)
+            
+            if self.device == 'gpu':
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                C_D = tf.transpose(C_D, perm=[1, 0, 2])
+                print 'C_D shape', C_D.shape
+                input_h = tf.zeros([2, tf.shape(values)[0], size])
+                input_c = tf.zeros([2, tf.shape(values)[0], size])
+                params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(2*self.value_vec_size, size, 2)),
+                    initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+                
+                U, _, _ = bidirection_rnn(C_D, input_h, input_c, params)
 
-            U = tf.concat([u_fw_out, u_bw_out], 2)
-            U = U[:,1:, :]
+                print 'U shape:', U.shape
+                U = tf.transpose(U, perm=[1, 0, 2])
+
+            else:
+                (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
+                    cell_fw=tf.nn.rnn_cell.BasicLSTMCell(size), cell_bw=tf.nn.rnn_cell.BasicLSTMCell(size), 
+                    inputs=C_D, dtype = tf.float32)
+                U = tf.concat([u_fw_out, u_bw_out], 2)
+
+            print 'U shape:', U.shape
+            U = U[:,:-1, :]
+            U=tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
-
+    
             return U
 
-    def concat_sentinel(self, sentinel_name, original_tensor):
-        '''
 
-        Args:  
-            sentinel_name: Variable name of sentinel.  # string
-            original_tensor: Tensor of rank 3 to left concatenate sentinel to. # of shape (batch_size, num_values, value_vec_size)
-        Returns:  
-            original_tensor with sentinel. 
+class DCNplusEncoder(object):
+    """Module for basic attention.
+    Note: in this module we use the terminology of "keys" and "values" (see lectures).
+    In the terminology of "X attends to Y", "keys attend to values".
+    In the baseline model, the keys are the context hidden states
+    and the values are the question hidden states.
+    We choose to use general terminology of keys and values in this module
+    (rather than context and question) to avoid confusion if you reuse this
+    module with other inputs.
+    """
 
-        '''
+    def __init__(self, keep_prob, key_vec_size, value_vec_size):
+        """
+        Inputs:
+          keep_prob: tensor containing a single scalar that is the keep probability (for dropout)
+          key_vec_size: size of the key vectors. int
+          value_vec_size: size of the value vectors. int
+        """
+        self.keep_prob = keep_prob
+        self.key_vec_size = key_vec_size
+        self.value_vec_size = value_vec_size
+        local_device_protos = device_lib.list_local_devices()
+        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+            # Only NVidia GPU is supported for now
+            self.device = 'gpu'
+        else:
+            self.device = 'cpu'
 
-        sentinel = tf.get_variable(name = sentinel_name, shape = original_tensor.get_shape()[2], \
-            initializer = tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
-        sentinel = tf.reshape(sentinel, (1, 1, -1))
-        sentinel = tf.tile(sentinel, (tf.shape(original_tensor)[0], 1, 1))
-        concat_tensor = tf.concat([sentinel, original_tensor], 1)
-        print('the shape of concat tensor is: ', concat_tensor.get_shape())
-        return concat_tensor
+    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=False, sentinel=False):
+
+        """
+        Keys attend to values.
+        For each key, return an attention distribution and an attention output vector.
+        Inputs:
+          values: Tensor shape (batch_size, num_values, value_vec_size).
+          values_mask: Tensor shape (batch_size, num_values).
+            1s where there's real input, 0s where there's padding
+          keys: Tensor shape (batch_size, num_keys, value_vec_size)
+        Outputs:
+          attn_dist: Tensor shape (batch_size, num_keys, num_values).
+            For each key, the distribution should sum to 1,
+            and should be 0 in the value locations that correspond to padding.
+          output: Tensor shape (batch_size, num_keys, hidden_size).
+            This is the attention output; the weighted sum of the values
+            (using the attention distribution as weights).
+        """
+
+        with vs.variable_scope("CoAttn"):
+
+            print('value_vec_size is: ', self.value_vec_size)
+            print('num_values size is: ', values.shape[1])
+            print('num_keys size is: ', keys.shape[1])
+            print('value_vec_size is (key):', keys.shape[2])
+            # Declare variable 
+            W = tf.get_variable("W", shape = (self.value_vec_size, self.value_vec_size), \
+                initializer = tf.contrib.layers.xavier_initializer())
+            b = tf.get_variable("b", shape = (values.shape[1], self.value_vec_size), initializer = tf.constant_initializer(0))
+
+            # Compute projected question hidden states
+
+            Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
+
+            print('Q shape is: ', Q.shape)
+            Q = concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
+
+            # sentinel = tf.get_variable(name='question_sentinel', shape=tf.shape(Q)[2], \
+            #     initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
+            # sentinel = tf.tile(sentinel, [tf.shape(original_tensor)[0], 1, 1])
+            # concat_tensor = tf.concat([original_tensor, sentinel], 2)
+
+            print('Q shape is: ', Q.shape)
+            D = keys # (batch_size, num_keys, value_vec_size)
+            D = concat_sentinel('document_sentinel', D, self.value_vec_size)
+
+            # key = document, value = question here
+            ### End your code here to implement 'Sentinel Vector'
+            # Compute affinity matrix L
+           
+            L = tf.matmul(D, tf.transpose(Q, perm=[0, 2, 1])) # shape (batch_size, num_keys, num_values)
+
+            print('L shape is :', L.shape)
+            # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
+            if use_mask:
+                values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(values)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "value_mask shape:", values_mask.shape
+                print "L shape:", L.shape
+                _, A_D = masked_softmax(L, mask=values_mask, dim=2) #(batch_size, num_keys, num_values)
+            else:
+                A_D = tf.nn.softmax(L, dim=-1)
+
+            C2Q_Attn = tf.matmul(A_D, Q) # (batch_size, num_keys, value_vec_size)
+
+            print('**C2Q_Attn shape is ', C2Q_Attn.get_shape())
+
+            # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
+            if use_mask:
+                keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(keys)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "key_mask shape:", keys_mask.shape
+                print "L shape:", L.shape
+                _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (batch_size, num_keys, num_values)
+            else:
+                A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
+
+            Q2C_Attn = tf.matmul(A_Q, D) # (batch_size, num_values, key_vec_size)
+
+            print('***Q2C_Attn shape is ', Q2C_Attn.get_shape())
+            # Compute second-level attention outputs S
+            S = tf.matmul(A_D, Q2C_Attn) # (batch_size, num_keys, value_vec_size)
+            print('******S size is: ', S.shape)
+
+            # Concatenate C2Q_Attn and S:
+            C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
+            #C_D = tf.nn.dropout(C_D, self.keep_prob)
+
+            print('co_context size is: ', C_D.shape)
+
+            S_D_1 = C2Q_Attn
+            S_Q_1 = Q2C_Attn
+            C_D_1 = S
+
+            print('S_D_1 is ', S_D_1.shape)
+            print('S_Q_1 is ', S_Q_1.shape)
+
+        with vs.variable_scope('lstm1'):
+            size = int(self.value_vec_size)
+            cell = tf.nn.rnn_cell.BasicLSTMCell(size)
+            Q_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw = cell,
+                cell_bw = cell,
+                dtype = tf.float32,
+                inputs = S_Q_1,
+         #       sequence_length = question_length
+            )
+            E_Q_2 = tf.concat(Q_fw_bw_encodings, 2)
+
+            D_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw = cell,
+                cell_bw = cell,
+                dtype = tf.float32,
+                inputs = S_D_1,
+         #       sequence_length = document_length
+            )    
+            E_D_2 = tf.concat(D_fw_bw_encodings, 2)
+
+        with vs.variable_scope('CoAttn2'):
+            L = tf.matmul(E_D_2, tf.transpose(E_Q_2, perm=[0, 2, 1])) # shape (batch_size, num_keys, num_values)
+            # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
+            if use_mask:
+                values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(values)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "value_mask shape:", values_mask.shape
+                print "L shape:", L.shape
+                _, A_D = masked_softmax(L, mask=values_mask, dim=2) #(batch_size, num_keys, num_values)
+            else:
+                A_D = tf.nn.softmax(L, dim=-1)
+
+            C2Q_Attn = tf.matmul(A_D, Q) # (batch_size, num_keys, value_vec_size)
+
+            print('C2Q_Attn shape is ', C2Q_Attn.get_shape())
+
+            # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
+            if use_mask:
+                keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(keys)[0], 1], dtype=tf.int32)], axis=1), 1)
+                print "key_mask shape:", keys_mask.shape
+                print "L shape:", L.shape
+                _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (batch_size, num_keys, num_values)
+            else:
+                A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
+
+            Q2C_Attn = tf.matmul(A_Q, D) # (batch_size, num_values, key_vec_size)
+
+            print('Q2C_Attn shape is ', Q2C_Attn.get_shape())
+            # Compute second-level attention outputs S
+            S = tf.matmul(A_D, Q2C_Attn) # (batch_size, num_keys, value_vec_size)
+            print('S size is: ', S.shape)
+
+            # Concatenate C2Q_Attn and S:
+            C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
+            #C_D = tf.nn.dropout(C_D, self.keep_prob)
+            print('co_context size is: ', C_D.shape)
+
+            S_D_2 = C2Q_Attn
+            S_Q_2 = Q2C_Attn
+            C_D_2 = S
+
+
+
+            #S_D_2, S_Q_2, C_D_2 = coattention(E_Q_2, E_Q_2.get_shape().as_list()[1], E_D_2, E_D_2.get_shape().as_list()[1],\
+             #values_mask, keys_mask)
+            E_D_1 = D
+            document_representations = tf.concat(\
+                [E_D_1, E_D_2, S_D_1, S_D_2, C_D_1, C_D_2], 2)#(N, D, 2H)
+
+        with vs.variable_scope('final_encoder'):
+            size = int(self.value_vec_size)
+            cell = tf.nn.rnn_cell.BasicLSTMCell(size)
+            outputs, _ = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw = cell,
+                cell_bw = cell,
+                dtype = tf.float32,
+                inputs = document_representations,
+        #        sequence_length = document_length,
+            )
+            encoding = tf.concat(outputs, 2)
+            encoding = encoding[:, :-1, :]
+            return encoding
+
+
+def concat_sentinel(sentinel_name, original_tensor, size):
+    '''
+
+    Args:  
+        sentinel_name: Variable name of sentinel.  # string
+        original_tensor: Tensor of rank 3 to left concatenate sentinel to. # of shape (batch_size, num_values, value_vec_size)
+    Returns:  
+        original_tensor with sentinel. 
+
+    '''
+
+    sentinel = tf.get_variable(name=sentinel_name, shape=(size),
+        initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
+    sentinel = tf.tile(tf.reshape(sentinel, [1, 1, -1]), [tf.shape(original_tensor)[0], 1, 1])
+    concat_tensor = tf.concat([original_tensor, sentinel], 1)
+    print('the shape of concat tensor is: ', concat_tensor.get_shape())
+    return concat_tensor
+
+
+def coattention(question, question_length, document, document_length, values_mask, keys_mask, use_mask=False, sentinel=False):
+    """ DCN+ Coattention layer.
+
+    Args:  
+        question: Tensor of rank 3, shape [N, Q, 2H].  
+        question_length: Tensor of rank 1, shape [N]. Lengths of questions without sentinel.  
+        document: Tensor of rank 3, shape [N, D, 2H].   
+        document_length: Tensor of rank 1, shape [N]. Lengths of documents without sentinel.  
+        sentinel: Scalar boolean. If True, then sentinel vectors are temporarily left concatenated
+        use_mask: Scalar boolean. If True, then use mask 
+        to the query's and document's second dimension, letting the attention focus on nothing.  
+    Returns:  
+        A tuple containing:  
+            summary matrix of the question, shape [N, Q, 2H].  
+            summary matrix of the document, shape [N, D, 2H].  
+            coattention matrix of the document and query in document space, shape [N, D, 2H].
+    """
+
+    """
+    The symbols in this method correspond to the following identifiers
+        A   = affinity
+        A^T = affinity_t
+        E^Q = query
+        E^D = document
+        S^Q = summary_q
+        S^D = summary_d
+        C^D = coattention_d
+    
+    The dimensions' indices in Einstein summation notation are
+        N = batch dimension
+        Q = question dimension
+        D = document dimension
+        H = hidden state dimension
+    """
+    Q = question
+
+    print('Q is ', Q)
+    print('+++++++++++++++++++++++++++')
+    D = document
+   
+
+    L = tf.matmul(D, tf.transpose(Q, perm=[0, 2, 1])) # shape (N, D, Q)
+
+    # Compute Context-to-Question (C2Q) Attention, we obtain C2Q attention outputs
+    if use_mask:
+        values_mask = tf.expand_dims(tf.concat([values_mask, tf.ones([tf.shape(Q)[0], 1], dtype=tf.int32)], axis=1), 1)
+        print "value_mask shape:", values_mask.shape
+        print "L shape:", L.shape
+        _, A_D = masked_softmax(L, mask=values_mask, dim=2) #(N, D, Q)
+    else:
+        A_D = tf.nn.softmax(L, dim=-1)
+
+    C2Q_Attn = tf.matmul(A_D, Q) # (N, D, 2H)
+
+    print('C2Q_Attn shape is: ', C2Q_Attn.shape)
+
+    # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
+    if use_mask:
+        keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(D)[0], 1], dtype=tf.int32)], axis=1), 1)
+        print "key_mask shape:", keys_mask.shape
+        print "L shape:", L.shape
+        _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (N, Q, D)
+    else:
+        A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
+
+    Q2C_Attn = tf.matmul(A_Q, D) # (N, Q, 2H)
+    print('Q2C_Attn shape is: ', Q2C_Attn.shape)
+
+    # Compute second-level attention outputs S
+    S = tf.matmul(A_D, Q2C_Attn) # (N, D, 2H)
+    print('S size is: ', S.shape)
+
+    # Concatenate C2Q_Attn and S:
+    # C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
+    #C_D = tf.nn.dropout(C_D, self.keep_prob)
+    #print('co_context size is: ', C_D.shape)
+
+    return C2Q_Attn, Q2C_Attn, S
 
 
 
@@ -435,3 +769,12 @@ def masked_softmax(logits, mask, dim):
     masked_logits = tf.add(logits, exp_mask) # where there's padding, set logits to -large
     prob_dist = tf.nn.softmax(masked_logits, dim)
     return masked_logits, prob_dist
+
+
+def estimate_cudnn_parameter_size(input_size, hidden_size, direction):
+    """
+    Compute the number of parameters needed to
+    construct a stack of LSTMs. 
+    """
+    single_rnn_size = 8 * hidden_size + 4 * (hidden_size * input_size) + 4 * (hidden_size * hidden_size)
+    return 2 * single_rnn_size

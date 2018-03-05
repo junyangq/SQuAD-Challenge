@@ -30,6 +30,9 @@ from vocab import get_glove
 from official_eval_helper import get_json_data, generate_answers
 
 
+seed = 111
+tf.set_random_seed(seed)
+
 logging.basicConfig(level=logging.INFO)
 
 MAIN_DIR = os.path.relpath(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))) # relative path of the main directory
@@ -42,7 +45,7 @@ tf.app.flags.DEFINE_integer("gpu", 0, "Which GPU to use, if you have multiple.")
 tf.app.flags.DEFINE_string("mode", "train", "Available modes: train / show_examples / official_eval")
 tf.app.flags.DEFINE_string("experiment_name", "", "Unique name for your experiment. This will create a directory by this name in the experiments/ directory, which will hold all data related to this experiment")
 tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means train indefinitely")
-tf.app.flags.DEFINE_string("attention", "basic", "Type of attention mode used in the network. It currently supports: basic/coattn")
+tf.app.flags.DEFINE_string("attention", "basic", "Type of attention mode used in the network. It currently supports: basic/coattn/drcoattn")
 tf.app.flags.DEFINE_string("decoder", "none", "Type of decoder used in the network. It currently supports: none/DPD")
 
 
