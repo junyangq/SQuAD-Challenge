@@ -170,6 +170,11 @@ class QAModel(object):
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask)
 
+        elif self.FLAGS.decoder == "DPDRL":
+            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask, "greedy")
+            self.logits_start_sample, self.logits_end_sample, _, _ = decoder.build_graph(attn_output, self.context_mask, "random")
+            self.reward = 1
         else:
             raise Exception("Decoder %s not supported." % self.FLAGS.decoder)
 
@@ -195,7 +200,7 @@ class QAModel(object):
         """
         with vs.variable_scope("loss"):
 
-            if self.FLAGS.decoder == "DPD":
+            if self.FLAGS.decoder == "DPD" or self.FLAGS.decoder == "DPDRL" :
                 # Calculate loss for prediction of start position
                 self.loss_start = tf.zeros((), dtype=tf.float32)
                 for i in range(self.FLAGS.DPD_n_iter):
@@ -223,6 +228,17 @@ class QAModel(object):
 
             # Add the two losses
             self.loss = self.loss_start + self.loss_end
+
+            if self.FLAGS.decoder == "DPDRL":
+                with tf.variable_scope("loss"):
+                    sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
+                    sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
+
+                rl_loss = -self.reward * (tf.reduce_mean(tf.add_n(self.logits_start_sample)) + tf.reduce_mean(tf.add_n(self.logits_end_sample)))
+
+                self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
+                            tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
+
             tf.summary.scalar('loss', self.loss)
 
 

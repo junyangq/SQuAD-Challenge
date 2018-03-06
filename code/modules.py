@@ -137,24 +137,27 @@ class DPDecoder(object):
         Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
 
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
-	mt1 = tf.nn.dropout(mt1, self.keep_prob)
+
+        mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
 
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
-	mt2 = tf.nn.dropout(mt2, self.keep_prob)
+
+        mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
         Z3 = tf.nn.dropout(Z3, self.keep_prob)
-	logits = tf.reduce_max(Z3, 2)  # out: (B * m)
+
+        logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
       return masked_softmax(logits, mask, 1)
 
 
     
 
-    def build_graph(self, U, context_mask):
+    def build_graph(self, U, context_mask, sample_type="greedy"):
         """
         Inputs:
           U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
@@ -183,14 +186,24 @@ class DPDecoder(object):
                 Ue = tf.gather_nd(U, e_stk)
                 _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 hidden = h_state[0]
-		hidden = tf.nn.dropout(hidden, self.keep_prob)
+                hidden = tf.nn.dropout(hidden, self.keep_prob)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
-                alphas[i] = alpha
-                betas[i] = beta
 
-                s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
-                e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
+                if sample_type == "greedy":
+                    s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
+                    e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
+                    alphas[i] = alpha
+                    betas[i] = beta
+                elif sample_type == "random":
+                    s = tf.cast(tf.squeeze(tf.multinomial(alpha, 1), axis=1), tf.int32)
+                    e = tf.cast(tf.squeeze(tf.multinomial(beta, 1), axis=1), tf.int32)
+                    s_stk_sample = tf.stack([idx, s], axis=1)
+                    e_stk_sample = tf.stack([idx, e], axis=1)
+                    alphas[i] = tf.gather_nd(prob_start, s_stk_sample)
+                    betas[i] = tf.gather_nd(prob_end, e_stk_sample)
+                else:
+                    raise Exception("Sample type %s not supported." % sample_type)
 
             return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
 
