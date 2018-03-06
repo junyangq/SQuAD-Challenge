@@ -133,21 +133,23 @@ class DPDecoder(object):
         Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
         Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
+
         Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
-        #mt1 = tf.nn.dropout(mt1, self.keep_prob)
+        mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
-        #mt2 = tf.nn.dropout(mt2, self.keep_prob)
+        mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-        #Z3 = tf.nn.dropout(Z3, self.keep_prob)
+        Z3 = tf.nn.dropout(Z3, self.keep_prob)
         logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
-        return masked_softmax(logits, mask, 1)
-
+      return masked_softmax(logits, mask, 1)
 
     
 
@@ -170,7 +172,9 @@ class DPDecoder(object):
             s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
             # e = end_pos
             e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
-            for _ in range(self.num_iterations):
+            alphas = [None] * self.num_iterations
+            betas = [None] * self.num_iterations
+            for i in range(self.num_iterations):
                 idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
                 s_stk = tf.stack([idx, s], axis=1)
                 e_stk = tf.stack([idx, e], axis=1)
@@ -178,15 +182,17 @@ class DPDecoder(object):
                 Ue = tf.gather_nd(U, e_stk)
                 _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 hidden = h_state[0]
-                #hidden = tf.nn.dropout(hidden, self.keep_prob)
+
+                hidden = tf.nn.dropout(hidden, self.keep_prob)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
+                alphas[i] = alpha
+                betas[i] = beta
 
-                print 'alpha shape: ', alpha.shape
                 s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
                 e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
 
-            return alpha, beta, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
+            return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 
@@ -320,6 +326,7 @@ class CoAttn(object):
         else:
             self.device = 'cpu'
 
+
     def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True, sentinel=False):
 
         """
@@ -355,6 +362,7 @@ class CoAttn(object):
             Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
 
             print('Q shape is: ', Q.shape)
+
             Q = concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
 
             # sentinel = tf.get_variable(name='question_sentinel', shape=tf.shape(Q)[2], \
@@ -364,6 +372,7 @@ class CoAttn(object):
 
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
+
             D = concat_sentinel('document_sentinel', D, self.value_vec_size)
 
             # key = document, value = question here
@@ -405,7 +414,7 @@ class CoAttn(object):
             C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
             C_D = tf.nn.dropout(C_D, self.keep_prob)
             print('co_context size is: ', C_D.shape)
-        
+
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
@@ -432,11 +441,10 @@ class CoAttn(object):
 
             print 'U shape:', U.shape
             U = U[:,:-1, :]
-            U=tf.nn.dropout(U, self.keep_prob)
+            U = tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
-    
-            return U
-
+            
+        return U
 
 
 class DCNplusEncoder(object):
@@ -506,7 +514,6 @@ class DCNplusEncoder(object):
                 D = concat_sentinel('document_sentinel', D, self.value_vec_size)
                 Q_length += 1
                 D_length += 1
-
 
         with vs.variable_scope("coattention_layer_1"):
             S_D_1, S_Q_1, C_D_1 = coattention(\

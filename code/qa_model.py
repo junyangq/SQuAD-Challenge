@@ -198,14 +198,30 @@ class QAModel(object):
         """
         with vs.variable_scope("loss"):
 
-            # Calculate loss for prediction of start position
-            loss_start = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start, labels=self.ans_span[:, 0]) # loss_start has shape (batch_size)
-            self.loss_start = tf.reduce_mean(loss_start) # scalar. avg across batch
+            if self.FLAGS.decoder == "DPD":
+                # Calculate loss for prediction of start position
+                self.loss_start = tf.zeros((), dtype=tf.float32)
+                for i in range(self.FLAGS.DPD_n_iter):
+                    loss_start = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start[i], labels=self.ans_span[:, 0]) # loss_start has shape (batch_size)
+                    self.loss_start += tf.reduce_mean(loss_start)
+
+                # Calculate loss for prediction of end position
+                self.loss_end = tf.zeros((), dtype=tf.float32)
+                for i in range(self.FLAGS.DPD_n_iter):
+                    loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end[i], labels=self.ans_span[:, 1]) # loss_start has shape (batch_size)
+                    self.loss_end += tf.reduce_mean(loss_end)
+
+            else:
+                # Calculate loss for prediction of start position
+                loss_start = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start, labels=self.ans_span[:, 0]) # loss_start has shape (batch_size)
+                self.loss_start = tf.reduce_mean(loss_start) # scalar. avg across batch
+
+                # Calculate loss for prediction of end position
+                loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end, labels=self.ans_span[:, 1])
+                self.loss_end = tf.reduce_mean(loss_end)
+
             tf.summary.scalar('loss_start', self.loss_start) # log to tensorboard
 
-            # Calculate loss for prediction of end position
-            loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end, labels=self.ans_span[:, 1])
-            self.loss_end = tf.reduce_mean(loss_end)
             tf.summary.scalar('loss_end', self.loss_end)
 
             # Add the two losses
