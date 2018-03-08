@@ -101,7 +101,8 @@ class DPDecoder(object):
         self.hidden_size = hidden_size
         self.pool_size = pool_size
         local_device_protos = device_lib.list_local_devices()
-        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+        
+	if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
             # Only NVidia GPU is supported for now
             self.device = 'gpu'
             self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
@@ -421,7 +422,7 @@ class CoAttn(object):
             size = int(self.value_vec_size)
             
             if self.device == 'gpu':
-                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, dropout=self.keep_prob, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
                 C_D = tf.transpose(C_D, perm=[1, 0, 2])
                 print 'C_D shape', C_D.shape
                 input_h = tf.zeros([2, tf.shape(values)[0], size])
