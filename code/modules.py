@@ -108,6 +108,7 @@ class DPDecoder(object):
         else:
             self.device = 'cpu'
             self.LSTM_dec = tf.nn.rnn_cell.BasicLSTMCell(self.hidden_size)
+	    self.LSTM_dec = DropoutWrapper(self.LSTM_dec, input_keep_prob=self.keep_prob)
         
     
     def HMN(self, U, hi, us, ue, mask, scope):
@@ -327,7 +328,7 @@ class CoAttn(object):
             self.device = 'cpu'
 
 
-    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True, sentinel=False):
+    def build_graph(self, values, values_mask, keys_mask, keys, use_mask=True):
 
         """
         Keys attend to values.
@@ -420,7 +421,7 @@ class CoAttn(object):
             size = int(self.value_vec_size)
             
             if self.device == 'gpu':
-                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, dropout=self.keep_prob, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
                 C_D = tf.transpose(C_D, perm=[1, 0, 2])
                 print 'C_D shape', C_D.shape
                 input_h = tf.zeros([2, tf.shape(values)[0], size])
@@ -435,7 +436,7 @@ class CoAttn(object):
 
             else:
                 (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
-                    cell_fw=tf.nn.rnn_cell.BasicLSTMCell(size), cell_bw=tf.nn.rnn_cell.BasicLSTMCell(size), 
+                    cell_fw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), cell_bw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), 
                     inputs=C_D, dtype = tf.float32)
                 U = tf.concat([u_fw_out, u_bw_out], 2)
 
@@ -526,6 +527,7 @@ class DCNplusEncoder(object):
 
             size = int(self.value_vec_size)
             cell = tf.nn.rnn_cell.BasicLSTMCell(size)
+	    cell = DropoutWrapper(cell, input_keep_prob=self.keep_prob)
             Q_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw = cell,
                 cell_bw = cell,
@@ -586,7 +588,7 @@ def concat_sentinel(sentinel_name, original_tensor, size):
     return concat_tensor
 
 
-def coattention(Q, Q_length, D, D_length, Q_mask, D_mask, use_mask=False):
+def coattention(Q, Q_length, D, D_length, Q_mask, D_mask, use_mask=True):
     """ DCN+ Coattention layer.
 
     Args:  
