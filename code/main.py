@@ -52,17 +52,17 @@ tf.app.flags.DEFINE_string("decoder", "none", "Type of decoder used in the netwo
 # Hyperparameters
 tf.app.flags.DEFINE_float("learning_rate", 0.001, "Learning rate.")
 tf.app.flags.DEFINE_float("max_gradient_norm", 5.0, "Clip gradients to this norm.")
-tf.app.flags.DEFINE_float("dropout", 0.12, "Fraction of units randomly dropped on non-recurrent connections.")
-tf.app.flags.DEFINE_integer("batch_size", 50, "Batch size to use")
+tf.app.flags.DEFINE_float("dropout", 0.2, "Fraction of units randomly dropped on non-recurrent connections.")
+tf.app.flags.DEFINE_integer("batch_size", 100, "Batch size to use")
 tf.app.flags.DEFINE_integer("hidden_size", 200, "Size of the hidden states")
-tf.app.flags.DEFINE_integer("context_len", 600, "The maximum context length of your model")
+tf.app.flags.DEFINE_integer("context_len", 400, "The maximum context length of your model")
 tf.app.flags.DEFINE_integer("question_len", 30, "The maximum question length of your model")
-tf.app.flags.DEFINE_integer("embedding_size", 100, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
+tf.app.flags.DEFINE_integer("embedding_size", 300, "Size of the pretrained word vectors. This needs to be one of the available GloVe dimensions: 50/100/200/300")
 tf.app.flags.DEFINE_integer("DPD_n_iter", 4, "Number of iterations in dynamic pointing decoder(DPD)")
 tf.app.flags.DEFINE_integer("pool_size", 16, "Size of pool in maxout network")
 
 # How often to print, save, eval
-tf.app.flags.DEFINE_integer("print_every", 1, "How many iterations to do per print.")
+tf.app.flags.DEFINE_integer("print_every", 10, "How many iterations to do per print.")
 tf.app.flags.DEFINE_integer("save_every", 500, "How many iterations to do per save.")
 tf.app.flags.DEFINE_integer("eval_every", 500, "How many iterations to do per calculating loss/f1/em on dev set. Warning: this is fairly time-consuming so don't do it too often.")
 tf.app.flags.DEFINE_integer("keep", 1, "How many checkpoints to keep. 0 indicates keep all (you shouldn't need to do keep all though - it's very storage intensive).")
