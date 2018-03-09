@@ -129,27 +129,26 @@ class DPDecoder(object):
         b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
 
         concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
- 
+	concat_h_us_ue = tf.nn.dropout(concat_h_us_ue, self.keep_prob)
         r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
-	r = tf.nn.dropout(r, self.keep_prob)
 
         Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
         Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
 
         Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
-	Z1 = tf.nn.dropout(Z1, self.keep_prob)
+	#Z1 = tf.nn.dropout(Z1, self.keep_prob)
 
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
-	Z2 = tf.nn.dropout(Z2, self.keep_prob)
+	#Z2 = tf.nn.dropout(Z2, self.keep_prob)
 
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-        Z3 = tf.nn.dropout(Z3, self.keep_prob)
+        #Z3 = tf.nn.dropout(Z3, self.keep_prob)
         logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
       return masked_softmax(logits, mask, 1)
@@ -359,7 +358,7 @@ class CoAttn(object):
             # Compute projected question hidden states
 
             Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
-
+	    Q = tf.nn.dropout(Q, self.keep_prob)
             print('Q shape is: ', Q.shape)
 
             Q = concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
@@ -371,7 +370,7 @@ class CoAttn(object):
 
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
-
+	    D = tf.dropout(D, self.keep_prob)
             D = concat_sentinel('document_sentinel', D, self.value_vec_size)
 
             # key = document, value = question here
