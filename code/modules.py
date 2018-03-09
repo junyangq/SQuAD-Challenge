@@ -101,7 +101,7 @@ class DPDecoder(object):
         self.hidden_size = hidden_size
         self.pool_size = pool_size
         local_device_protos = device_lib.list_local_devices()
-        
+         
 	if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
             # Only NVidia GPU is supported for now
             self.device = 'gpu'
@@ -129,22 +129,23 @@ class DPDecoder(object):
         b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
 
         concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
-      
+ 
         r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
+	r = tf.nn.dropout(r, self.keep_prob)
 
         Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
         Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
 
         Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
+	Z1 = tf.nn.dropout(Z1, self.keep_prob)
 
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
-        mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+	Z2 = tf.nn.dropout(Z2, self.keep_prob)
 
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
-        mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
@@ -184,8 +185,6 @@ class DPDecoder(object):
                 Ue = tf.gather_nd(U, e_stk)
                 _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 hidden = h_state[0]
-
-                hidden = tf.nn.dropout(hidden, self.keep_prob)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
                 alphas[i] = alpha
@@ -234,8 +233,6 @@ class SimpleSoftmaxLayer(object):
             masked_logits, prob_dist = masked_softmax(logits, masks, 1)
 
             return masked_logits, prob_dist
-
-
 
 
 
