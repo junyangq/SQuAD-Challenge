@@ -101,12 +101,13 @@ class DPDecoder(object):
         self.hidden_size = hidden_size
         self.pool_size = pool_size
         local_device_protos = device_lib.list_local_devices()
-         
+        
 	if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
             # Only NVidia GPU is supported for now
             self.device = 'gpu'
             self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
         else:
+
             self.device = 'cpu'
             self.LSTM_dec = tf.nn.rnn_cell.BasicLSTMCell(self.hidden_size)
 	    self.LSTM_dec = DropoutWrapper(self.LSTM_dec, input_keep_prob=self.keep_prob)
@@ -370,7 +371,7 @@ class CoAttn(object):
 
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
-	    D = tf.dropout(D, self.keep_prob)
+	    D = tf.nn.dropout(D, self.keep_prob)
             D = concat_sentinel('document_sentinel', D, self.value_vec_size)
 
             # key = document, value = question here
