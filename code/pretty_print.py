@@ -29,7 +29,7 @@ def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn):
     A_Q=A_Q.T[cstart:cend]
     print "AQ ",A_Q.shape
     print "AD ",A_D.shape
-    plt.rcParams["figure.figsize"] = [15,15]
+    plt.rcParams["figure.figsize"] = [10,10]
     plt.subplot(2, 1, 1)
     plt.imshow(A_D,interpolation='none',cmap='gray')
     plt.title('C2Q Attention Distribution',fontsize=8)
