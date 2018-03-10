@@ -16,10 +16,36 @@
 
 from colorama import Fore, Back, Style
 from vocab import _PAD
+import matplotlib.pyplot as plt
 
 # See here for more colorama formatting options:
 # https://pypi.python.org/pypi/colorama
 
+def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn):
+    cstart=max(pred_ans_start-12,0) 
+    cend=min(pred_ans_end+12,400)
+    context=context[cstart:cend]
+    A_D=A_D[cstart:cend]
+    A_Q=A_Q.T[cstart:cend]
+    print "AQ ",A_Q.shape
+    print "AD ",A_D.shape
+    plt.rcParams["figure.figsize"] = [15,15]
+    plt.subplot(2, 1, 1)
+    plt.imshow(A_D,interpolation='none',cmap='gray')
+    plt.title('C2Q Attention Distribution',fontsize=8)
+    plt.ylabel('Cropped Context',fontsize=8)
+    plt.xlabel('Question',fontsize=8)
+    plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
+    plt.yticks(range(len(context)),context,fontsize=8)
+    plt.subplot(2, 1, 2)
+    plt.title('Q2C Attention Distribution',fontsize=8)
+    plt.imshow(A_Q,interpolation='none')
+    plt.ylabel('Cropped Context',fontsize=8)
+    plt.xlabel('Question',fontsize=8)
+    plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
+    plt.yticks(range(len(context)),context,fontsize=8)
+    plt.tight_layout()
+    plt.show()
 
 def yellowtext(s):
     """Yellow text"""
