@@ -140,14 +140,13 @@ class QAModel(object):
             _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
         elif self.FLAGS.attention == "coattn":
             attn_layer = CoAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
+            attn_output,self.A_D,self.A_Q = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*4)
         elif self.FLAGS.attention == "drcoattn":
             attn_layer = DCNplusEncoder(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
             attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens)
         else:
             raise Exception("Attention mode %s not supported." % self.FLAGS.attention)
-
-
+	
         if self.FLAGS.decoder == "none":
             # Concat attn_output to context_hiddens to get blended_reps
             blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
@@ -310,9 +309,9 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
-        output_feed = [self.probdist_start, self.probdist_end]
-        [probdist_start, probdist_end] = session.run(output_feed, input_feed)
-        return probdist_start, probdist_end
+        output_feed = [self.probdist_start, self.probdist_end, self.A_D, self.A_Q]
+        [probdist_start, probdist_end, C2Qdist, Q2Cdist] = session.run(output_feed, input_feed)
+        return probdist_start, probdist_end, C2Qdist, Q2Cdist
 
 
     def get_start_end_pos(self, session, batch):
@@ -328,13 +327,13 @@ class QAModel(object):
             The most likely start and end positions for each example in the batch.
         """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
-        start_dist, end_dist = self.get_prob_dists(session, batch)
+        start_dist, end_dist, A_D, A_Q = self.get_prob_dists(session, batch)
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
         start_pos = np.argmax(start_dist, axis=1)
         end_pos = np.argmax(end_dist, axis=1)
 
-        return start_pos, end_pos
+        return start_pos, end_pos, start_dist, end_dist, A_D, A_Q
 
 
     def get_dev_loss(self, session, dev_context_path, dev_qn_path, dev_ans_path):
@@ -414,7 +413,7 @@ class QAModel(object):
         # That means we're truncating, rather than discarding, examples with too-long context or questions
         for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=False):
 
-            pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
+            pred_start_pos, pred_end_pos, start_dist,end_dist, C2Q, Q2C = self.get_start_end_pos(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size
@@ -441,6 +440,8 @@ class QAModel(object):
                 # Optionally pretty-print
                 if print_to_screen:
                     print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em)
+		 
+		    print "SHAPES: ",start_dist[ex_idx].shape, end_dist[ex_idx].shape, C2Q[ex_idx].shape, Q2C[ex_idx].shape   
 
                 if num_samples != 0 and example_num >= num_samples:
                     break

@@ -101,16 +101,16 @@ class DPDecoder(object):
         self.hidden_size = hidden_size
         self.pool_size = pool_size
         local_device_protos = device_lib.list_local_devices()
-        
+        '''
 	if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
             # Only NVidia GPU is supported for now
             self.device = 'gpu'
             self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
         else:
-
-            self.device = 'cpu'
-            self.LSTM_dec = tf.nn.rnn_cell.BasicLSTMCell(self.hidden_size)
-	    self.LSTM_dec = DropoutWrapper(self.LSTM_dec, input_keep_prob=self.keep_prob)
+	'''
+        self.device = 'gpu'
+        self.LSTM_dec = tf.nn.rnn_cell.BasicLSTMCell(self.hidden_size)
+	self.LSTM_dec = DropoutWrapper(self.LSTM_dec, input_keep_prob=self.keep_prob)
         
     
     def HMN(self, U, hi, us, ue, mask, scope):
@@ -337,12 +337,11 @@ class CoAttn(object):
             1s where there's real input, 0s where there's padding
           keys: Tensor shape (batch_size, num_keys, value_vec_size)
         Outputs:
-          attn_dist: Tensor shape (batch_size, num_keys, num_values).
-            For each key, the distribution should sum to 1,
-            and should be 0 in the value locations that correspond to padding.
-          output: Tensor shape (batch_size, num_keys, hidden_size).
+          U: Tensor shape (batch_size, num_keys, hidden_size*4).
             This is the attention output; the weighted sum of the values
             (using the attention distribution as weights).
+	  A_D: C2Q attn dist
+	  A_Q: Q2C attn dist
         """
 
         with vs.variable_scope("CoAttn"):
@@ -398,7 +397,7 @@ class CoAttn(object):
                 keys_mask = tf.expand_dims(tf.concat([keys_mask, tf.ones([tf.shape(keys)[0], 1], dtype=tf.int32)], axis=1), 1)
                 print "key_mask shape:", keys_mask.shape
                 print "L shape:", L.shape
-                _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (batch_size, num_keys, num_values)
+                _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=keys_mask, dim=-1) # (batch_size, num_values, num_keys)
             else:
                 A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
 
@@ -443,7 +442,7 @@ class CoAttn(object):
             U = tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
             
-        return U
+        return U,A_D,A_Q
 
 
 class DCNplusEncoder(object):
@@ -625,7 +624,7 @@ def coattention(Q, Q_length, D, D_length, Q_mask, D_mask, use_mask=True):
     # Compute Question-to-Context (Q2C) Attention, we obtain Q2C attention outputs
     if use_mask:
         D_mask = tf.expand_dims(tf.concat([D_mask, tf.ones([tf.shape(D)[0], 1], dtype=tf.int32)], axis=1), 1)
-        _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=D_mask, dim=-1) # (batch_size, num_keys, num_values)
+        _, A_Q = masked_softmax(tf.transpose(L, perm=[0, 2, 1]), mask=D_mask, dim=-1) # (batch_size, num_values, num_keys)
     else:
         A_Q = tf.nn.softmax(tf.transpose(L, perm=[0, 2, 1]), dim=2)
     S_Q = tf.matmul(A_Q, D) # (batch_size, num_values, key_vec_size)
