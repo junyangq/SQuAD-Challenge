@@ -1,5 +1,4 @@
 # Copyright 2018 Stanford University
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -29,7 +28,7 @@ from tensorflow.python.ops import embedding_ops
 
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
-from pretty_print import print_example
+from pretty_print import print_example, plot_CoAttn
 from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, CoAttn, DCNplusEncoder, DPDecoder
 
 logging.basicConfig(level=logging.INFO)
@@ -441,7 +440,7 @@ class QAModel(object):
                 if print_to_screen:
                     print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em)
 		 
-		    print "SHAPES: ",start_dist[ex_idx].shape, end_dist[ex_idx].shape, C2Q[ex_idx].shape, Q2C[ex_idx].shape   
+		    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx])
 
                 if num_samples != 0 and example_num >= num_samples:
                     break
