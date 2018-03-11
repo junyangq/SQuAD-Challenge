@@ -13,6 +13,7 @@
 # limitations under the License.
 
 """This file contains functions to pretty-print a SQuAD example"""
+"""and function to print distributions"""
 
 from colorama import Fore, Back, Style
 from vocab import _PAD
@@ -21,15 +22,19 @@ import matplotlib.pyplot as plt
 # See here for more colorama formatting options:
 # https://pypi.python.org/pypi/colorama
 
-def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn):
-    cstart=max(pred_ans_start-12,0) 
-    cend=min(pred_ans_end+12,400)
+def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn,decS,decE):
+    '''
+    context: for one example, shape=(context_len)
+    qn: np.array of string, shape=(qn_len)
+    decS: np.ndarray, shape=(dec_iter,1,context_len), start dist. from DPD steps
+    decE: same above, for end dist.
+    '''
+    cstart=max(pred_ans_start-15,0)
+    cend=min(pred_ans_end+15,400)
     context=context[cstart:cend]
     A_D=A_D[cstart:cend]
     A_Q=A_Q.T[cstart:cend]
-    print "AQ ",A_Q.shape
-    print "AD ",A_D.shape
-    plt.rcParams["figure.figsize"] = [10,10]
+    plt.rcParams["figure.figsize"] = [15,15]
     plt.subplot(2, 1, 1)
     plt.imshow(A_D,interpolation='none',cmap='gray')
     plt.title('C2Q Attention Distribution',fontsize=8)
@@ -46,6 +51,46 @@ def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn):
     plt.yticks(range(len(context)),context,fontsize=8)
     plt.tight_layout()
     plt.show()
+    plt.rcParams["figure.figsize"] = [15,8]
+    plt.subplot(8,1,1)
+    plt.title('start/end dist. from dynamic decoder at step 1',fontsize=8)
+    plt.imshow(decS[0],interpolation='none',aspect=5)
+    plt.xticks(range(len(context)),context,rotation='vertical',fontsize=8)
+    plt.yticks([])
+    plt.subplot(8,1,2)
+    plt.imshow(decE[0],interpolation='none')
+    plt.xticks([])
+    plt.yticks([])
+    plt.subplot(8,1,3)
+    plt.title('start/end dist. at step 2',fontsize=8)
+    plt.imshow(decS[1],interpolation='none')
+    plt.xticks([])
+    plt.yticks([])
+    plt.subplot(8,1,4)
+    plt.imshow(decE[1],interpolation='none')
+    plt.xticks([])
+    plt.yticks([])
+    plt.subplot(8,1,5)
+    plt.title('start/end dist. at step 3',fontsize=8)
+    plt.imshow(decS[2],interpolation='none')
+    plt.xticks([])
+    plt.yticks([])
+    plt.subplot(8,1,6)
+    plt.imshow(decE[2],interpolation='none')
+    plt.xticks([])
+    plt.yticks([])
+    plt.subplot(8,1,7)
+    plt.title('start/end dist. at step 4',fontsize=8)
+    plt.imshow(decS[3],interpolation='none')
+    plt.xticks([])
+    plt.yticks([])
+    plt.subplot(8,1,8)
+    plt.imshow(decE[3],interpolation='none')
+    plt.xticks([])
+    plt.yticks([])
+    plt.tight_layout()
+    plt.show()
+
 
 def yellowtext(s):
     """Yellow text"""
