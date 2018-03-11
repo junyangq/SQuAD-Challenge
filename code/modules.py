@@ -141,11 +141,13 @@ class DPDecoder(object):
 	#Z1 = tf.nn.dropout(Z1, self.keep_prob)
 
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
+        mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
 	#Z2 = tf.nn.dropout(Z2, self.keep_prob)
 
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+        mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
@@ -183,8 +185,8 @@ class DPDecoder(object):
                 e_stk = tf.stack([idx, e], axis=1)
                 Us = tf.gather_nd(U, s_stk)
                 Ue = tf.gather_nd(U, e_stk)
-                _, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
-                hidden = h_state[0]
+                hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
+              #  hidden = h_state[0]
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
                 alphas[i] = alpha
@@ -417,25 +419,25 @@ class CoAttn(object):
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
             
-            if self.device == 'gpu':
-                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
-                C_D = tf.transpose(C_D, perm=[1, 0, 2])
-                print 'C_D shape', C_D.shape
-                input_h = tf.zeros([2, tf.shape(values)[0], size])
-                input_c = tf.zeros([2, tf.shape(values)[0], size])
-                params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(2*self.value_vec_size, size, 2)),
-                    initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
-                
-                U, _, _ = bidirection_rnn(C_D, input_h, input_c, params)
+          #  if self.device == 'gpu':
+          #      bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+          #      C_D = tf.transpose(C_D, perm=[1, 0, 2])
+          #      print 'C_D shape', C_D.shape
+          #      input_h = tf.zeros([2, tf.shape(values)[0], size])
+          #      input_c = tf.zeros([2, tf.shape(values)[0], size])
+          #      params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(2*self.value_vec_size, size, 2)),
+          #          initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+          #      
+          #      U, _, _ = bidirection_rnn(C_D, input_h, input_c, params)
+#
+          #      print 'U shape:', U.shape
+          #      U = tf.transpose(U, perm=[1, 0, 2])
 
-                print 'U shape:', U.shape
-                U = tf.transpose(U, perm=[1, 0, 2])
-
-            else:
-                (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
-                    cell_fw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), cell_bw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), 
-                    inputs=C_D, dtype = tf.float32)
-                U = tf.concat([u_fw_out, u_bw_out], 2)
+          #  else:
+            (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
+                cell_fw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), cell_bw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), 
+                inputs=C_D, dtype = tf.float32)
+            U = tf.concat([u_fw_out, u_bw_out], 2)
 
             print 'U shape:', U.shape
             U = U[:,:-1, :]
