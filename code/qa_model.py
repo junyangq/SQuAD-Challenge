@@ -90,6 +90,7 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
+	self.reward=tf.placeholder(tf.float32,shape=[None])
 
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
@@ -171,7 +172,10 @@ class QAModel(object):
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask)
 
-        else:
+        elif self.FLAGS.decoder == "DPDRL":
+	    pass # set self.s_hat, self.e_hat
+
+	else:
             raise Exception("Decoder %s not supported." % self.FLAGS.decoder)
 
 
@@ -224,6 +228,15 @@ class QAModel(object):
 
             # Add the two losses
             self.loss = self.loss_start + self.loss_end
+
+	    if self.FLAGS.decoder == "DPDRL":
+                with tf.variable_scope("loss"):
+                    sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
+                    sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
+                rl_loss = -self.reward * (tf.reduce_mean(tf.add_n(self.logits_start_sample)) + tf.reduce_mean(tf.add_n(self.logits_end_sample)))
+                self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
+                            tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
+
             tf.summary.scalar('loss', self.loss)
 
 
@@ -254,6 +267,11 @@ class QAModel(object):
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
 
+	if self.FLAGS.decoder == "DPDRL":
+	    output_feed_temp = [self.s_hat,self.e_hat]    
+	    [s_hat, e_hat]=session.run(output_feed_temp, input_feed)
+	    input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens)
+
         # Run the model
         [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
 
@@ -261,6 +279,28 @@ class QAModel(object):
         summary_writer.add_summary(summaries, global_step)
 
         return loss, global_step, param_norm, gradient_norm
+
+
+    def Reward(self, s_hat,e_hat,true_span,context,s_g=None, e_g=None):
+      """
+        Calculate F1 for a batch of predictions
+        Inputs:
+            s_hat: from actor decoder, numpy array of shape (batch)
+            e_hat: from actor decoder 
+            true_span: batch.ans_span, numpy array of shape (batch, 2)
+            context: batch.context_tokens, list of shape (batch, context_len)
+            s_g: from greedy baseline decoder, numpy array of shape (batch)
+            e_g: from greedy baseline decoder 
+      
+        Returns:
+            difference of F1 with true answer: numpy array of shape (batch_size)
+        """      
+      R=[]
+      for b, (s, e, true) in enumerate(zip(s_hat, e_hat, true_span)):
+        true_ans = " ".join(context[b][true[0] : true[1] + 1])
+        pred_ans = " ".join(context[b][s : e + 1])
+        R.append(f1_score(pred_ans, true_ans))        
+      return np.array(R)
 
 
     def get_loss(self, session, batch):
@@ -308,9 +348,9 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
-        output_feed = [self.probdist_start, self.probdist_end, self.logits_start, self.logits_end, self.A_D, self.A_Q]
-        [probdist_start, probdist_end, decSdist, decEdist, C2Qdist, Q2Cdist] = session.run(output_feed, input_feed)
-        return probdist_start, probdist_end, decSdist, decEdist, C2Qdist, Q2Cdist
+        output_feed = [self.probdist_start, self.probdist_end, self.A_D, self.A_Q]
+        [probdist_start, probdist_end, C2Qdist, Q2Cdist] = session.run(output_feed, input_feed)
+        return probdist_start, probdist_end, C2Qdist, Q2Cdist
 
 
     def get_start_end_pos(self, session, batch):
@@ -326,7 +366,7 @@ class QAModel(object):
             The most likely start and end positions for each example in the batch.
         """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
-        start_dist, end_dist,_decS,_decE, _AD, _AQ = self.get_prob_dists(session, batch)
+        start_dist, end_dist, _AD, _AQ = self.get_prob_dists(session, batch)
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
         start_pos = np.argmax(start_dist, axis=1)
@@ -414,7 +454,7 @@ class QAModel(object):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
             if print_to_screen:
-                start_dist,end_dist,decSL,decEL,C2Q,Q2C = self.get_prob_dists(session, batch)
+                start_dist,end_dist, C2Q, Q2C = self.get_prob_dists(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size
@@ -441,7 +481,7 @@ class QAModel(object):
                 # Optionally pretty-print
                 if print_to_screen:
                     print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em) 
-                    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx],decSL,decEL,ex_idx)
+                    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx])
 
                 if num_samples != 0 and example_num >= num_samples:
                     break
@@ -563,4 +603,3 @@ def write_summary(value, tag, summary_writer, global_step):
     summary = tf.Summary()
     summary.value.add(tag=tag, simple_value=value)
     summary_writer.add_summary(summary, global_step)
-
