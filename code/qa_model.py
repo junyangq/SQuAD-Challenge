@@ -326,13 +326,13 @@ class QAModel(object):
             The most likely start and end positions for each example in the batch.
         """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
-        start_dist, end_dist, A_D, A_Q = self.get_prob_dists(session, batch)
+        start_dist, end_dist, _AD, _AQ = self.get_prob_dists(session, batch)
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
         start_pos = np.argmax(start_dist, axis=1)
         end_pos = np.argmax(end_dist, axis=1)
 
-        return start_pos, end_pos, start_dist, end_dist, A_D, A_Q
+        return start_pos, end_pos
 
 
     def get_dev_loss(self, session, dev_context_path, dev_qn_path, dev_ans_path):
@@ -412,7 +412,9 @@ class QAModel(object):
         # That means we're truncating, rather than discarding, examples with too-long context or questions
         for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=False):
 
-            pred_start_pos, pred_end_pos, start_dist,end_dist, C2Q, Q2C = self.get_start_end_pos(session, batch)
+            pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
+            if print_to_screen:
+                start_dist,end_dist, C2Q, Q2C = self.get_prob_dists(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size
@@ -438,9 +440,8 @@ class QAModel(object):
 
                 # Optionally pretty-print
                 if print_to_screen:
-                    print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em)
-		 
-		    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx])
+                    print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em) 
+                    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx])
 
                 if num_samples != 0 and example_num >= num_samples:
                     break
@@ -562,3 +563,4 @@ def write_summary(value, tag, summary_writer, global_step):
     summary = tf.Summary()
     summary.value.add(tag=tag, simple_value=value)
     summary_writer.add_summary(summary, global_step)
+
