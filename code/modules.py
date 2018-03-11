@@ -168,6 +168,11 @@ class DPDecoder(object):
           out:
             alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
             beta: Tensor shape (batch_size, context_len). Logits of end position for each word
+	    alphas: (DPDiter, batch_size, context_len)
+	    betas: 
+	    prob_start: 
+	    prob_end:
+
         """
         with vs.variable_scope("DPDecoder", reuse=tf.AUTO_REUSE):
 

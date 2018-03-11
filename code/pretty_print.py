@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 # See here for more colorama formatting options:
 # https://pypi.python.org/pypi/colorama
 
-def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn,decS,decE):
+def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn,decS,decE,idx):
     '''
     context: for one example, shape=(context_len)
     qn: np.array of string, shape=(qn_len)
@@ -31,7 +31,7 @@ def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn,decS,decE):
     '''
     cstart=max(pred_ans_start-15,0)
     cend=min(pred_ans_end+15,400)
-    context=context[cstart:cend]
+    contextc=context[cstart:cend]
     A_D=A_D[cstart:cend]
     A_Q=A_Q.T[cstart:cend]
     plt.rcParams["figure.figsize"] = [15,15]
@@ -41,51 +41,61 @@ def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn,decS,decE):
     plt.ylabel('Cropped Context',fontsize=8)
     plt.xlabel('Question',fontsize=8)
     plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
-    plt.yticks(range(len(context)),context,fontsize=8)
+    plt.yticks(range(len(contextc)),contextc,fontsize=8)
     plt.subplot(2, 1, 2)
     plt.title('Q2C Attention Distribution',fontsize=8)
     plt.imshow(A_Q,interpolation='none')
     plt.ylabel('Cropped Context',fontsize=8)
     plt.xlabel('Question',fontsize=8)
     plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
-    plt.yticks(range(len(context)),context,fontsize=8)
+    plt.yticks(range(len(contextc)),contextc,fontsize=8)
     plt.tight_layout()
     plt.show()
+    cstart=max(pred_ans_start-25,0)
+    cend=min(pred_ans_end+25,400)
     plt.rcParams["figure.figsize"] = [15,8]
     plt.subplot(8,1,1)
     plt.title('start/end dist. from dynamic decoder at step 1',fontsize=8)
-    plt.imshow(decS[0],interpolation='none',aspect=5)
+    decS0=decS[0][idx][cstart:cend]
+    plt.imshow(decS0,interpolation='none',aspect=5)
     plt.xticks(range(len(context)),context,rotation='vertical',fontsize=8)
     plt.yticks([])
     plt.subplot(8,1,2)
-    plt.imshow(decE[0],interpolation='none')
+    decE0=decE[0][idx][cstart:cend]
+    plt.imshow(decE0,interpolation='none')
     plt.xticks([])
     plt.yticks([])
     plt.subplot(8,1,3)
     plt.title('start/end dist. at step 2',fontsize=8)
-    plt.imshow(decS[1],interpolation='none')
+    decS1=decS[1][idx][cstart:cend]
+    plt.imshow(decS1,interpolation='none')
     plt.xticks([])
     plt.yticks([])
     plt.subplot(8,1,4)
-    plt.imshow(decE[1],interpolation='none')
+    decE1=decE[1][idx][cstart:cend]
+    plt.imshow(decE1,interpolation='none')
     plt.xticks([])
     plt.yticks([])
     plt.subplot(8,1,5)
     plt.title('start/end dist. at step 3',fontsize=8)
+    decS2=decS[2][idx][cstart:cend]
     plt.imshow(decS[2],interpolation='none')
     plt.xticks([])
     plt.yticks([])
     plt.subplot(8,1,6)
-    plt.imshow(decE[2],interpolation='none')
+    decE2=decE[2][idx][cstart:cend]
+    plt.imshow(decE2,interpolation='none')
     plt.xticks([])
     plt.yticks([])
     plt.subplot(8,1,7)
     plt.title('start/end dist. at step 4',fontsize=8)
-    plt.imshow(decS[3],interpolation='none')
+    decS3=decS[3][idx][cstart:cend]
+    plt.imshow(decS3,interpolation='none')
     plt.xticks([])
     plt.yticks([])
     plt.subplot(8,1,8)
-    plt.imshow(decE[3],interpolation='none')
+    decE3=decE[3][idx][cstart:cend]
+    plt.imshow(decE3,interpolation='none')
     plt.xticks([])
     plt.yticks([])
     plt.tight_layout()

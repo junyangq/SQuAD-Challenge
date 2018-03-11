@@ -308,9 +308,9 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
-        output_feed = [self.probdist_start, self.probdist_end, self.A_D, self.A_Q]
-        [probdist_start, probdist_end, C2Qdist, Q2Cdist] = session.run(output_feed, input_feed)
-        return probdist_start, probdist_end, C2Qdist, Q2Cdist
+        output_feed = [self.probdist_start, self.probdist_end, self.logits_start, self.logits_end, self.A_D, self.A_Q]
+        [probdist_start, probdist_end, decSdist, decEdist, C2Qdist, Q2Cdist] = session.run(output_feed, input_feed)
+        return probdist_start, probdist_end, decSdist, decEdist, C2Qdist, Q2Cdist
 
 
     def get_start_end_pos(self, session, batch):
@@ -326,7 +326,7 @@ class QAModel(object):
             The most likely start and end positions for each example in the batch.
         """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
-        start_dist, end_dist, _AD, _AQ = self.get_prob_dists(session, batch)
+        start_dist, end_dist,_decS,_decE, _AD, _AQ = self.get_prob_dists(session, batch)
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
         start_pos = np.argmax(start_dist, axis=1)
@@ -414,7 +414,7 @@ class QAModel(object):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
             if print_to_screen:
-                start_dist,end_dist, C2Q, Q2C = self.get_prob_dists(session, batch)
+                start_dist,end_dist,decSL,decEL,C2Q,Q2C = self.get_prob_dists(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size
@@ -441,7 +441,7 @@ class QAModel(object):
                 # Optionally pretty-print
                 if print_to_screen:
                     print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em) 
-                    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx])
+                    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx],decSL,decEL,ex_idx)
 
                 if num_samples != 0 and example_num >= num_samples:
                     break
