@@ -1,5 +1,4 @@
 # Copyright 2018 Stanford University
-#
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
 # You may obtain a copy of the License at
@@ -30,7 +29,8 @@ from tensorflow.python.ops import embedding_ops
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
 from pretty_print import print_example
-from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, CoAttn, DPDecoder
+# from pretty_print import plot_CoAttn
+from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, CoAttn, DCNplusEncoder, DPDecoder
 
 logging.basicConfig(level=logging.INFO)
 
@@ -91,6 +91,10 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
+        self.reward=tf.placeholder(tf.float32,shape=[None])
+        self.ss = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None])
+        self.es = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None])
+        self.exists=tf.placeholder(tf.bool,shape=())
 
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
@@ -140,11 +144,13 @@ class QAModel(object):
             _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
         elif self.FLAGS.attention == "coattn":
             attn_layer = CoAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
+            attn_output,self.A_D,self.A_Q = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*4)
+        elif self.FLAGS.attention == "drcoattn":
+            attn_layer = DCNplusEncoder(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens)
         else:
             raise Exception("Attention mode %s not supported." % self.FLAGS.attention)
-
-
+	
         if self.FLAGS.decoder == "none":
             # Concat attn_output to context_hiddens to get blended_reps
             blended_reps = tf.concat([context_hiddens, attn_output], axis=2) # (batch_size, context_len, hidden_size*4)
@@ -173,8 +179,10 @@ class QAModel(object):
         elif self.FLAGS.decoder == "DPDRL":
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask, "greedy")
-            self.logits_start_sample, self.logits_end_sample, _, _ = decoder.build_graph(attn_output, self.context_mask, "random")
-            self.reward = 1
+            self.logits_start_sample, self.logits_end_sample, self.ss_hat, self.es_hat, self.s_hat, self.e_hat = tf.cond(self.exists, 
+                lambda: decoder.build_graph(attn_output, self.context_mask, "random", self.ss, self.es),
+                lambda: decoder.build_graph(attn_output, self.context_mask, "random")
+                )
         else:
             raise Exception("Decoder %s not supported." % self.FLAGS.decoder)
 
@@ -222,6 +230,8 @@ class QAModel(object):
                 loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end, labels=self.ans_span[:, 1])
                 self.loss_end = tf.reduce_mean(loss_end)
 
+            print 'loss start shape:', tf.shape(self.loss_start)
+
             tf.summary.scalar('loss_start', self.loss_start) # log to tensorboard
 
             tf.summary.scalar('loss_end', self.loss_end)
@@ -229,17 +239,15 @@ class QAModel(object):
             # Add the two losses
             self.loss = self.loss_start + self.loss_end
 
-            if self.FLAGS.decoder == "DPDRL":
-                with tf.variable_scope("loss"):
-                    sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
-                    sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
+        if self.FLAGS.decoder == "DPDRL":
+            with tf.variable_scope("loss"):
+                sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
+                sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
+            rl_loss = -tf.reduce_mean(self.reward * (tf.add_n(self.logits_start_sample) + tf.add_n(self.logits_end_sample)))
+            self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
+                        tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
 
-                rl_loss = -self.reward * (tf.reduce_mean(tf.add_n(self.logits_start_sample)) + tf.reduce_mean(tf.add_n(self.logits_end_sample)))
-
-                self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
-                            tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
-
-            tf.summary.scalar('loss', self.loss)
+        tf.summary.scalar('loss', self.loss)
 
 
     def run_train_iter(self, session, batch, summary_writer):
@@ -265,10 +273,18 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
+        input_feed[self.exists] = False
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
 
+        if self.FLAGS.decoder == "DPDRL":
+          output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat]
+          [ss_hat, es_hat, s_hat, e_hat]=session.run(output_feed_temp, input_feed)
+          input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens)
+          input_feed[self.exists]=True
+          input_feed[self.ss]=ss_hat
+          input_feed[self.es]=es_hat
         # Run the model
         [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
 
@@ -276,6 +292,28 @@ class QAModel(object):
         summary_writer.add_summary(summaries, global_step)
 
         return loss, global_step, param_norm, gradient_norm
+
+
+    def Reward(self, s_hat,e_hat,true_span,context,s_g=None, e_g=None):
+      """
+        Calculate F1 for a batch of predictions
+        Inputs:
+            s_hat: from actor decoder, numpy array of shape (batch)
+            e_hat: from actor decoder 
+            true_span: batch.ans_span, numpy array of shape (batch, 2)
+            context: batch.context_tokens, list of shape (batch, context_len)
+            s_g: from greedy baseline decoder, numpy array of shape (batch)
+            e_g: from greedy baseline decoder 
+      
+        Returns:
+            difference of F1 with true answer: numpy array of shape (batch_size)
+        """      
+      R=[]
+      for b, (s, e, true) in enumerate(zip(s_hat, e_hat, true_span)):
+        true_ans = " ".join(context[b][true[0] : true[1] + 1])
+        pred_ans = " ".join(context[b][s : e + 1])
+        R.append(f1_score(pred_ans, true_ans))        
+      return np.array(R)
 
 
     def get_loss(self, session, batch):
@@ -323,9 +361,9 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
-        output_feed = [self.probdist_start, self.probdist_end]
-        [probdist_start, probdist_end] = session.run(output_feed, input_feed)
-        return probdist_start, probdist_end
+        output_feed = [self.probdist_start, self.probdist_end, self.A_D, self.A_Q]
+        [probdist_start, probdist_end, C2Qdist, Q2Cdist] = session.run(output_feed, input_feed)
+        return probdist_start, probdist_end, C2Qdist, Q2Cdist
 
 
     def get_start_end_pos(self, session, batch):
@@ -341,7 +379,7 @@ class QAModel(object):
             The most likely start and end positions for each example in the batch.
         """
         # Get start_dist and end_dist, both shape (batch_size, context_len)
-        start_dist, end_dist = self.get_prob_dists(session, batch)
+        start_dist, end_dist, _AD, _AQ = self.get_prob_dists(session, batch)
 
         # Take argmax to get start_pos and end_post, both shape (batch_size)
         start_pos = np.argmax(start_dist, axis=1)
@@ -428,6 +466,8 @@ class QAModel(object):
         for batch in get_batch_generator(self.word2id, context_path, qn_path, ans_path, self.FLAGS.batch_size, context_len=self.FLAGS.context_len, question_len=self.FLAGS.question_len, discard_long=False):
 
             pred_start_pos, pred_end_pos = self.get_start_end_pos(session, batch)
+            if print_to_screen:
+                start_dist,end_dist, C2Q, Q2C = self.get_prob_dists(session, batch)
 
             # Convert the start and end positions to lists length batch_size
             pred_start_pos = pred_start_pos.tolist() # list length batch_size
@@ -453,7 +493,8 @@ class QAModel(object):
 
                 # Optionally pretty-print
                 if print_to_screen:
-                    print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em)
+                    print_example(self.word2id, batch.context_tokens[ex_idx], batch.qn_tokens[ex_idx], batch.ans_span[ex_idx, 0], batch.ans_span[ex_idx, 1], pred_ans_start, pred_ans_end, true_answer, pred_answer, f1, em) 
+                    plot_CoAttn(pred_ans_start,pred_ans_end,C2Q[ex_idx],Q2C[ex_idx],batch.context_tokens[ex_idx],batch.qn_tokens[ex_idx])
 
                 if num_samples != 0 and example_num >= num_samples:
                     break
