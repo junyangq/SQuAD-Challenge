@@ -153,23 +153,26 @@ class DPDecoder(object):
 
         concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
         concat_h_us_ue = tf.nn.dropout(concat_h_us_ue, self.keep_prob)
+
         r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
 
+        U = tf.nn.dropout(U, self.keep_prob)
         Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
+        r = tf.nn.dropout(r, self.keep_prob)
         Z12 = tf.tensordot(r, W12, [[1],[2]])  # Z12: (B * p * l)
 
         Z1 = Z11 + tf.expand_dims(Z12, 1) + b1
 	#Z1 = tf.nn.dropout(Z1, self.keep_prob)
 
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
-        mt1 = tf.nn.dropout(mt1, 2.5*self.keep_prob)
+        mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
 	#Z2 = tf.nn.dropout(Z2, self.keep_prob)
 
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
-        mt2 = tf.nn.dropout(mt2, 2.5*self.keep_prob)
+        mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
@@ -230,8 +233,8 @@ class DPDecoder(object):
                     Us = tf.gather_nd(U, s_stk)
                     Ue = tf.gather_nd(U, e_stk)
 
-                Us = tf.nn.dropout(Us, self.keep_prob)
-                Ue = tf.nn.dropout(Ue, self.keep_prob)
+                # Us = tf.nn.dropout(Us, self.keep_prob)
+                # Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
@@ -270,8 +273,8 @@ class DPDecoder(object):
                 if exists:
                     return alphas, betas, ss, es, s, e
                 else:
-                    print "waht is ss?!", ss
-                    print "shapeeeeeee:", tf.shape(tf.concat(ss, axis=0))
+                    # print "waht is ss?!", ss
+                    # print "shapeeeeeee:", tf.shape(tf.concat(ss, axis=0))
                     return alphas, betas, tf.concat(ss, axis=0), tf.concat(es,axis=0), s, e
             else:
                 return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
@@ -519,7 +522,7 @@ class CoAttn(object):
               U = tf.concat([u_fw_out, u_bw_out], 2)
 
             U = U[:,:-1, :]
-            U = tf.nn.dropout(U, self.keep_prob)
+            # U = tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
             
         return U,A_D,A_Q
