@@ -214,6 +214,8 @@ class DPDecoder(object):
                 s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
             # e = end_pos
                 e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+            else:
+                raise Exception("Initialization type %s not supported." % self.init_type)
 
             if ss is None:
                 ss = [None] * self.num_iterations
