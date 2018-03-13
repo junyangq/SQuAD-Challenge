@@ -28,7 +28,8 @@ from tensorflow.python.ops import embedding_ops
 
 from evaluate import exact_match_score, f1_score
 from data_batcher import get_batch_generator
-from pretty_print import print_example, plot_CoAttn
+from pretty_print import print_example
+# from pretty_print import plot_CoAttn
 from modules import RNNEncoder, SimpleSoftmaxLayer, BasicAttn, CoAttn, DCNplusEncoder, DPDecoder
 
 logging.basicConfig(level=logging.INFO)
@@ -90,7 +91,10 @@ class QAModel(object):
         self.qn_ids = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
-	self.reward=tf.placeholder(tf.float32,shape=[None])
+        self.reward=tf.placeholder(tf.float32,shape=[None])
+        self.ss = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None])
+        self.es = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None])
+        self.exists=tf.placeholder(tf.bool,shape=())
 
         # Add a placeholder to feed in the keep probability (for dropout).
         # This is necessary so that we can instruct the model to use dropout when training, but not when testing
@@ -173,9 +177,13 @@ class QAModel(object):
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask)
 
         elif self.FLAGS.decoder == "DPDRL":
-	    pass # set self.s_hat, self.e_hat
-
-	else:
+            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask, "greedy")
+            self.logits_start_sample, self.logits_end_sample, self.ss_hat, self.es_hat, self.s_hat, self.e_hat = tf.cond(self.exists, 
+                lambda: decoder.build_graph(attn_output, self.context_mask, "random", self.ss, self.es),
+                lambda: decoder.build_graph(attn_output, self.context_mask, "random")
+                )
+        else:
             raise Exception("Decoder %s not supported." % self.FLAGS.decoder)
 
 
@@ -200,7 +208,7 @@ class QAModel(object):
         """
         with vs.variable_scope("loss"):
 
-            if self.FLAGS.decoder == "DPD":
+            if self.FLAGS.decoder == "DPD" or self.FLAGS.decoder == "DPDRL" :
                 # Calculate loss for prediction of start position
                 self.loss_start = tf.zeros((), dtype=tf.float32)
                 for i in range(self.FLAGS.DPD_n_iter):
@@ -222,6 +230,8 @@ class QAModel(object):
                 loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end, labels=self.ans_span[:, 1])
                 self.loss_end = tf.reduce_mean(loss_end)
 
+            print 'loss start shape:', tf.shape(self.loss_start)
+
             tf.summary.scalar('loss_start', self.loss_start) # log to tensorboard
 
             tf.summary.scalar('loss_end', self.loss_end)
@@ -229,15 +239,15 @@ class QAModel(object):
             # Add the two losses
             self.loss = self.loss_start + self.loss_end
 
-	    if self.FLAGS.decoder == "DPDRL":
-                with tf.variable_scope("loss"):
-                    sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
-                    sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
-                rl_loss = -self.reward * (tf.reduce_mean(tf.add_n(self.logits_start_sample)) + tf.reduce_mean(tf.add_n(self.logits_end_sample)))
-                self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
-                            tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
+        if self.FLAGS.decoder == "DPDRL":
+            with tf.variable_scope("loss"):
+                sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
+                sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
+            rl_loss = -tf.reduce_mean(self.reward * (tf.add_n(self.logits_start_sample) + tf.add_n(self.logits_end_sample)))
+            self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
+                        tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
 
-            tf.summary.scalar('loss', self.loss)
+        tf.summary.scalar('loss', self.loss)
 
 
     def run_train_iter(self, session, batch, summary_writer):
@@ -263,15 +273,18 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
+        input_feed[self.exists] = False
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
 
-	if self.FLAGS.decoder == "DPDRL":
-	    output_feed_temp = [self.s_hat,self.e_hat]    
-	    [s_hat, e_hat]=session.run(output_feed_temp, input_feed)
-	    input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens)
-
+        if self.FLAGS.decoder == "DPDRL":
+          output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat]
+          [ss_hat, es_hat, s_hat, e_hat]=session.run(output_feed_temp, input_feed)
+          input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens)
+          input_feed[self.exists]=True
+          input_feed[self.ss]=ss_hat
+          input_feed[self.es]=es_hat
         # Run the model
         [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
 
