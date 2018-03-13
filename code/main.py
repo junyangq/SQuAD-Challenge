@@ -47,7 +47,7 @@ tf.app.flags.DEFINE_string("experiment_name", "", "Unique name for your experime
 tf.app.flags.DEFINE_integer("num_epochs", 0, "Number of epochs to train. 0 means train indefinitely")
 tf.app.flags.DEFINE_string("attention", "basic", "Type of attention mode used in the network. It currently supports: basic/coattn/drcoattn")
 tf.app.flags.DEFINE_string("decoder", "none", "Type of decoder used in the network. It currently supports: none/DPD")
-tf.app.flags.DEFINE_integer("DPD_init", "zero", "Type of initialization applied in dynamic pointer decoder. It currently supports: zero/var")
+tf.app.flags.DEFINE_string("DPD_init", "zero", "Type of initialization applied in dynamic pointer decoder. It currently supports: zero/var")
 
 
 # Hyperparameters
