@@ -38,19 +38,24 @@ class RNNEncoder(object):
     This code uses a bidirectional GRU, but you could experiment with other types of RNN.
     """
 
-    def __init__(self, hidden_size, keep_prob):
+    def __init__(self, hidden_size, keep_prob, embed_size):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
           keep_prob: Tensor containing a single scalar that is the keep probability (for dropout)
         """
+        
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
-        self.rnn_cell_fw = rnn_cell.GRUCell(self.hidden_size)
+        self.embed_size = embed_size
+        """
+        #self.rnn_cell_fw = tf.contrib.rnn.LSTMBlockCell(self.hidden_size, reuse=tf.AUTO_REUSE)
+        self.rnn_cell_fw = rnn_cell.BasicLSTMCell(self.hidden_size)
         self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        self.rnn_cell_bw = rnn_cell.GRUCell(self.hidden_size)
+        #self.rnn_cell_bw = tf.contrib.rnn.LSTMBlockCell(self.hidden_size, reuse=tf.AUTO_REUSE)
+        self.rnn_cell_bw = rnn_cell.BasicLSTMCell(self.hidden_size)
         self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
-
+        """
     def build_graph(self, inputs, masks):
         """
         Inputs:
@@ -63,16 +68,30 @@ class RNNEncoder(object):
           out: Tensor shape (batch_size, seq_len, hidden_size*2).
             This is all hidden states (fw and bw hidden states are concatenated).
         """
-        with vs.variable_scope("RNNEncoder"):
+        with vs.variable_scope("RNNEncoder", reuse=tf.AUTO_REUSE):
             input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
-
+            
+            """
             # Note: fw_out and bw_out are the hidden states for every timestep.
             # Each is shape (batch_size, seq_len, hidden_size).
             (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw, self.rnn_cell_bw, inputs, input_lens, dtype=tf.float32)
 
             # Concatenate the forward and backward hidden states
             out = tf.concat([fw_out, bw_out], 2)
+            """
 
+
+            size = int(self.hidden_size)
+            bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+           # inputs = tf.transpose(inputs, perm=[1,0,2])
+            input_h = tf.zeros([2, tf.shape(inputs)[0], size])
+            input_c = tf.zeros([2, tf.shape(inputs)[0], size])
+            inputs = tf.transpose(inputs, perm=[1,0,2])
+            params = tf.get_variable("RNNEncoder", shape=(estimate_cudnn_parameter_size(self.embed_size, size, 2)),
+              initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+
+            out, _, _ = bidirection_rnn(inputs, input_h, input_c, params)
+            out = tf.transpose(out, perm=[1, 0, 2])
             # Apply dropout
             out = tf.nn.dropout(out, self.keep_prob)
 
@@ -101,16 +120,16 @@ class DPDecoder(object):
         self.hidden_size = hidden_size
         self.pool_size = pool_size
         local_device_protos = device_lib.list_local_devices()
-        '''
-	if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+        
+        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
             # Only NVidia GPU is supported for now
             self.device = 'gpu'
             self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
         else:
-	'''
-        self.device = 'gpu'
-        self.LSTM_dec = tf.nn.rnn_cell.BasicLSTMCell(self.hidden_size)
-        self.LSTM_dec = DropoutWrapper(self.LSTM_dec, input_keep_prob=self.keep_prob)
+
+            self.device = 'cpu'
+            self.LSTM_dec = rnn_cell.BasicLSTMCell(self.hidden_size)
+	    self.LSTM_dec = DropoutWrapper(self.LSTM_dec, input_keep_prob=self.keep_prob)
         
     
     def HMN(self, U, hi, us, ue, mask, scope):
@@ -141,25 +160,24 @@ class DPDecoder(object):
 	#Z1 = tf.nn.dropout(Z1, self.keep_prob)
 
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
-        mt1 = tf.nn.dropout(mt1, self.keep_prob)
+        mt1 = tf.nn.dropout(mt1, 2.5*self.keep_prob)
 
         Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
 	#Z2 = tf.nn.dropout(Z2, self.keep_prob)
 
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
-        mt2 = tf.nn.dropout(mt2, self.keep_prob)
+        mt2 = tf.nn.dropout(mt2, 2.5*self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-        # Z3 = tf.nn.dropout(Z3, self.keep_prob)
-
+        #Z3 = tf.nn.dropout(Z3, self.keep_prob)
         logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
       return masked_softmax(logits, mask, 1)
 
     
 
-    def build_graph(self, U, context_mask, sample_type="greedy", ss=None, es=None):
+    def build_graph(self, U, context_mask):
         """
         Inputs:
           U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
@@ -169,11 +187,6 @@ class DPDecoder(object):
           out:
             alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
             beta: Tensor shape (batch_size, context_len). Logits of end position for each word
-	    alphas: (DPDiter, batch_size, context_len)
-	    betas: 
-	    prob_start: 
-	    prob_end:
-
         """
         with vs.variable_scope("DPDecoder", reuse=tf.AUTO_REUSE):
 
@@ -185,64 +198,31 @@ class DPDecoder(object):
             e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
             alphas = [None] * self.num_iterations
             betas = [None] * self.num_iterations
-
-            if sample_type == "random":
-                if ss is None:
-                    exists = False
-                    ss = [None] * self.num_iterations
-                    es = [None] * self.num_iterations
-                else:
-                    exists = True
-
+            us0 = tf.get_variable('us0', shape=(2*self.hidden_size), dtype=tf.float32)
+            ue0 = tf.get_variable('ue0', shape=(2*self.hidden_size), dtype=tf.float32)
             for i in range(self.num_iterations):
                 idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
                 s_stk = tf.stack([idx, s], axis=1)
                 e_stk = tf.stack([idx, e], axis=1)
-                Us = tf.gather_nd(U, s_stk)
-                Ue = tf.gather_nd(U, e_stk)
+                if i > 0:
+                  Us = tf.gather_nd(U, s_stk)
+                  Ue = tf.gather_nd(U, e_stk)
+                else:
+                  Us = tf.tile(tf.expand_dims(us0, axis=0), [tf.shape(U)[0], 1])
+                  Us = tf.nn.dropout(Us, self.keep_prob)
+                  Ue = tf.tile(tf.expand_dims(ue0, axis=0), [tf.shape(U)[0], 1])
+                  Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
+              #  hidden = h_state[0]
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
+                alphas[i] = alpha
+                betas[i] = beta
 
-                if sample_type == "greedy":
-                    s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
-                    e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
-                    alphas[i] = alpha
-                    betas[i] = beta
-                elif sample_type == "random":
-                    # s, e = tf.cond(exists, 
-                    #     lambda: (ss[i], es[i]), 
-                    #     lambda: (tf.cast(tf.squeeze(tf.multinomial(alpha, 1), axis=1), tf.int32), 
-                    #              tf.cast(tf.squeeze(tf.multinomial(beta, 1), axis=1), tf.int32), 
-                    #              s))
-                    # ss[i], es[i] = tf.cond(exists,
-                    #     lambda: (ss[i], es[i]),
-                    #     lambda: (s, e))
-                    if exists:
-                        s = ss[i]
-                        e = es[i]
-                    else:
-                        s = tf.cast(tf.squeeze(tf.multinomial(alpha, 1), axis=1), tf.int32)
-                        e = tf.cast(tf.squeeze(tf.multinomial(beta, 1), axis=1), tf.int32)
-                        ss[i] = tf.expand_dims(s, axis=0)
-                        es[i] = tf.expand_dims(e, axis=0)
-                    print "waht is s: ", s
-                    s_stk_sample = tf.stack([idx, s], axis=1)
-                    e_stk_sample = tf.stack([idx, e], axis=1)
-                    alphas[i] = tf.gather_nd(prob_start, s_stk_sample)
-                    betas[i] = tf.gather_nd(prob_end, e_stk_sample)
-                else:
-                    raise Exception("Sample type %s not supported." % sample_type)
+                s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
+                e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
 
-            if sample_type == "random":
-                if exists:
-                    return alphas, betas, ss, es, s, e
-                else:
-                    print "waht is ss?!", ss
-                    print "shapeeeeeee:", tf.shape(tf.concat(ss, axis=0))
-                    return alphas, betas, tf.concat(ss, axis=0), tf.concat(es,axis=0), s, e
-            else:
-                return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
+            return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 
@@ -458,7 +438,7 @@ class CoAttn(object):
             print('S size is: ', S.shape)
 
             # Concatenate C2Q_Attn and S:
-            C_D = tf.concat([C2Q_Attn, S], 2)  # (batch_size, num_keys, 2 * value_vec_size)
+            C_D = tf.concat([D, C2Q_Attn, S], 2)  # (batch_size, num_keys, 3 * value_vec_size)
             C_D = tf.nn.dropout(C_D, self.keep_prob)
             print('co_context size is: ', C_D.shape)
 
@@ -466,25 +446,25 @@ class CoAttn(object):
             # print('co_input size is: ', co_input.shape)
             size = int(self.value_vec_size)
             
-          #  if self.device == 'gpu':
-          #      bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
-          #      C_D = tf.transpose(C_D, perm=[1, 0, 2])
-          #      print 'C_D shape', C_D.shape
-          #      input_h = tf.zeros([2, tf.shape(values)[0], size])
-          #      input_c = tf.zeros([2, tf.shape(values)[0], size])
-          #      params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(2*self.value_vec_size, size, 2)),
-          #          initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
-          #      
-          #      U, _, _ = bidirection_rnn(C_D, input_h, input_c, params)
+            if self.device == 'gpu':
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 3*size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                C_D = tf.transpose(C_D, perm=[1, 0, 2])
+                print 'C_D shape', C_D.shape
+                input_h = tf.zeros([2, tf.shape(values)[0], size])
+                input_c = tf.zeros([2, tf.shape(values)[0], size])
+                params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(3*self.value_vec_size, size, 2)),
+                    initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+                
+                U, _, _ = bidirection_rnn(C_D, input_h, input_c, params)
 #
-          #      print 'U shape:', U.shape
-          #      U = tf.transpose(U, perm=[1, 0, 2])
+                print 'U shape:', U.shape
+                U = tf.transpose(U, perm=[1, 0, 2])
 
-          #  else:
-            (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), cell_bw=DropoutWrapper(tf.nn.rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), 
-                inputs=C_D, dtype = tf.float32)
-            U = tf.concat([u_fw_out, u_bw_out], 2)
+            else:
+              (u_fw_out, u_bw_out), _ = tf.nn.bidirectional_dynamic_rnn(
+                  cell_fw=DropoutWrapper(rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), cell_bw=DropoutWrapper(rnn_cell.BasicLSTMCell(size),input_keep_prob=self.keep_prob), 
+                  inputs=C_D, dtype = tf.float32)
+              U = tf.concat([u_fw_out, u_bw_out], 2)
 
             print 'U shape:', U.shape
             U = U[:,:-1, :]
@@ -573,7 +553,7 @@ class DCNplusEncoder(object):
 
             size = int(self.value_vec_size)
             cell = tf.nn.rnn_cell.BasicLSTMCell(size)
-            cell = DropoutWrapper(cell, input_keep_prob=self.keep_prob)
+	    cell = DropoutWrapper(cell, input_keep_prob=self.keep_prob)
             Q_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw = cell,
                 cell_bw = cell,
