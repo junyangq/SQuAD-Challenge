@@ -92,8 +92,8 @@ class QAModel(object):
         self.qn_mask = tf.placeholder(tf.int32, shape=[None, self.FLAGS.question_len])
         self.ans_span = tf.placeholder(tf.int32, shape=[None, 2])
         self.reward=tf.placeholder(tf.float32,shape=[None])
-        self.ss = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None])
-        self.es = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None])
+        self.ss = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None], name="selfss")
+        self.es = tf.placeholder(tf.int32, shape=[self.FLAGS.DPD_n_iter, None], name="selfes")
         self.exists=tf.placeholder(tf.bool,shape=())
 
         # Add a placeholder to feed in the keep probability (for dropout).
@@ -239,12 +239,11 @@ class QAModel(object):
             # Add the two losses
             self.loss = self.loss_start + self.loss_end
 
-        if self.FLAGS.decoder == "DPDRL":
-            with tf.variable_scope("loss"):
+            if self.FLAGS.decoder == "DPDRL":
                 sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
                 sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
-            rl_loss = -tf.reduce_mean(self.reward * (tf.add_n(self.logits_start_sample) + tf.add_n(self.logits_end_sample)))
-            self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
+                rl_loss = -tf.reduce_mean(self.reward * (tf.add_n(self.logits_start_sample) + tf.add_n(self.logits_end_sample)))  # !!!!!!!! not adding self.logits_start_sample
+                self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
                         tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
 
         tf.summary.scalar('loss', self.loss)
@@ -274,6 +273,8 @@ class QAModel(object):
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
         input_feed[self.exists] = False
+	input_feed[self.es]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
+	input_feed[self.ss]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]

@@ -173,14 +173,15 @@ class DPDecoder(object):
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
-        #Z3 = tf.nn.dropout(Z3, self.keep_prob)
+        # Z3 = tf.nn.dropout(Z3, self.keep_prob)
+
         logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
       return masked_softmax(logits, mask, 1)
 
     
 
-    def build_graph(self, U, context_mask):
+    def build_graph(self, U, context_mask, sample_type="greedy", ss=None, es=None):
         """
         Inputs:
           U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
@@ -188,8 +189,13 @@ class DPDecoder(object):
 
         Returns:
           out:
-            alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
-            beta: Tensor shape (batch_size, context_len). Logits of end position for each word
+          alpha: Tensor shape (batch_size, context_len). Logits of start position for each word
+          beta: Tensor shape (batch_size, context_len). Logits of end position for each word
+	  alphas: (DPDiter, batch_size, context_len)
+	  betas: 
+	  prob_start: 
+	  prob_end:
+
         """
         with vs.variable_scope("DPDecoder", reuse=tf.AUTO_REUSE):
 
@@ -220,16 +226,48 @@ class DPDecoder(object):
                 Us = tf.nn.dropout(Us, self.keep_prob)
                 Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
-              #  hidden = h_state[0]
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
-                alphas[i] = alpha
-                betas[i] = beta
 
-                s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
-                e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
+                if sample_type == "greedy":
+                    s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
+                    e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
+                    alphas[i] = alpha
+                    betas[i] = beta
+                elif sample_type == "random":
+                    # s, e = tf.cond(exists, 
+                    #     lambda: (ss[i], es[i]), 
+                    #     lambda: (tf.cast(tf.squeeze(tf.multinomial(alpha, 1), axis=1), tf.int32), 
+                    #              tf.cast(tf.squeeze(tf.multinomial(beta, 1), axis=1), tf.int32), 
+                    #              s))
+                    # ss[i], es[i] = tf.cond(exists,
+                    #     lambda: (ss[i], es[i]),
+                    #     lambda: (s, e))
+                    if exists:
+                        s = ss[i]
+                        e = es[i]
+                    else:
+                        s = tf.cast(tf.squeeze(tf.multinomial(alpha, 1), axis=1), tf.int32)
+                        e = tf.cast(tf.squeeze(tf.multinomial(beta, 1), axis=1), tf.int32)
+                        ss[i] = tf.expand_dims(s, axis=0)
+                        es[i] = tf.expand_dims(e, axis=0)
+                    print "waht is s: ", s
+                    s_stk_sample = tf.stack([idx, s], axis=1)
+                    e_stk_sample = tf.stack([idx, e], axis=1)
+                    alphas[i] = tf.gather_nd(prob_start, s_stk_sample)
+                    betas[i] = tf.gather_nd(prob_end, e_stk_sample)
+                else:
+                    raise Exception("Sample type %s not supported." % sample_type)
 
-            return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
+            if sample_type == "random":
+                if exists:
+                    return alphas, betas, ss, es, s, e
+                else:
+                    print "waht is ss?!", ss
+                    print "shapeeeeeee:", tf.shape(tf.concat(ss, axis=0))
+                    return alphas, betas, tf.concat(ss, axis=0), tf.concat(es,axis=0), s, e
+            else:
+                return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 
@@ -473,7 +511,6 @@ class CoAttn(object):
                   inputs=C_D, dtype = tf.float32)
               U = tf.concat([u_fw_out, u_bw_out], 2)
 
-            print 'U shape:', U.shape
             U = U[:,:-1, :]
             U = tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
@@ -560,7 +597,7 @@ class DCNplusEncoder(object):
 
             size = int(self.value_vec_size)
             cell = tf.nn.rnn_cell.BasicLSTMCell(size)
-	    cell = DropoutWrapper(cell, input_keep_prob=self.keep_prob)
+            cell = DropoutWrapper(cell, input_keep_prob=self.keep_prob)
             Q_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw = cell,
                 cell_bw = cell,
