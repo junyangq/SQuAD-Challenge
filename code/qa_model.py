@@ -272,20 +272,21 @@ class QAModel(object):
         input_feed[self.qn_mask] = batch.qn_mask
         input_feed[self.ans_span] = batch.ans_span
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
-        input_feed[self.exists] = False
-        input_feed[self.es]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
-        input_feed[self.ss]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
+        if self.FLAGS.decoder == "DPDRL":
+            input_feed[self.exists] = False
+            input_feed[self.es]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
+            input_feed[self.ss]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
 
         if self.FLAGS.decoder == "DPDRL":
-          output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat]
-          [ss_hat, es_hat, s_hat, e_hat]=session.run(output_feed_temp, input_feed)
-          input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens)
-          input_feed[self.exists]=True
-          input_feed[self.ss]=ss_hat
-          input_feed[self.es]=es_hat
+            output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat]
+            [ss_hat, es_hat, s_hat, e_hat]=session.run(output_feed_temp, input_feed)
+            input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens)
+            input_feed[self.exists]=True
+            input_feed[self.ss]=ss_hat
+            input_feed[self.es]=es_hat
         # Run the model
         [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
 
