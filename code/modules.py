@@ -48,14 +48,20 @@ class RNNEncoder(object):
         self.hidden_size = hidden_size
         self.keep_prob = keep_prob
         self.embed_size = embed_size
-        """
+
+        local_device_protos = device_lib.list_local_devices()
+
+        if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
+            self.device = 'gpu'
+        else:
+            self.device = 'cpu'
         #self.rnn_cell_fw = tf.contrib.rnn.LSTMBlockCell(self.hidden_size, reuse=tf.AUTO_REUSE)
-        self.rnn_cell_fw = rnn_cell.BasicLSTMCell(self.hidden_size)
-        self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
+            self.rnn_cell_fw = rnn_cell.BasicLSTMCell(self.hidden_size)
+            self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
         #self.rnn_cell_bw = tf.contrib.rnn.LSTMBlockCell(self.hidden_size, reuse=tf.AUTO_REUSE)
-        self.rnn_cell_bw = rnn_cell.BasicLSTMCell(self.hidden_size)
-        self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
-        """
+            self.rnn_cell_bw = rnn_cell.BasicLSTMCell(self.hidden_size)
+            self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
+
     def build_graph(self, inputs, masks):
         """
         Inputs:
@@ -69,31 +75,28 @@ class RNNEncoder(object):
             This is all hidden states (fw and bw hidden states are concatenated).
         """
         with vs.variable_scope("RNNEncoder", reuse=tf.AUTO_REUSE):
-            input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
-            
-            """
+
+            if self.device == 'cpu':
+                input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
             # Note: fw_out and bw_out are the hidden states for every timestep.
             # Each is shape (batch_size, seq_len, hidden_size).
-            (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw, self.rnn_cell_bw, inputs, input_lens, dtype=tf.float32)
-
+                (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw, self.rnn_cell_bw, inputs, input_lens, dtype=tf.float32)
             # Concatenate the forward and backward hidden states
-            out = tf.concat([fw_out, bw_out], 2)
-            """
+                out = tf.concat([fw_out, bw_out], 2)
+            else:
+                size = int(self.hidden_size)
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                # inputs = tf.transpose(inputs, perm=[1,0,2])
+                input_h = tf.zeros([2, tf.shape(inputs)[0], size])
+                input_c = tf.zeros([2, tf.shape(inputs)[0], size])
+                inputs = tf.transpose(inputs, perm=[1,0,2])
+                params = tf.get_variable("RNNEncoder", shape=(estimate_cudnn_parameter_size(self.embed_size, size, 2)),
+                    initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
 
-
-            size = int(self.hidden_size)
-            bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
-           # inputs = tf.transpose(inputs, perm=[1,0,2])
-            input_h = tf.zeros([2, tf.shape(inputs)[0], size])
-            input_c = tf.zeros([2, tf.shape(inputs)[0], size])
-            inputs = tf.transpose(inputs, perm=[1,0,2])
-            params = tf.get_variable("RNNEncoder", shape=(estimate_cudnn_parameter_size(self.embed_size, size, 2)),
-              initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
-
-            out, _, _ = bidirection_rnn(inputs, input_h, input_c, params)
-            out = tf.transpose(out, perm=[1, 0, 2])
-            # Apply dropout
-            out = tf.nn.dropout(out, self.keep_prob)
+                out, _, _ = bidirection_rnn(inputs, input_h, input_c, params)
+                out = tf.transpose(out, perm=[1, 0, 2])
+                # Apply dropout
+                out = tf.nn.dropout(out, self.keep_prob)
 
             return out
 
@@ -105,7 +108,7 @@ class DPDecoder(object):
 
     """
 
-    def __init__(self, keep_prob, num_iterations, context_len, hidden_size, pool_size):
+    def __init__(self, keep_prob, num_iterations, context_len, hidden_size, pool_size, init_type):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
@@ -119,6 +122,7 @@ class DPDecoder(object):
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.pool_size = pool_size
+        self.init_type = init_type
         local_device_protos = device_lib.list_local_devices()
         
         if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
@@ -126,7 +130,6 @@ class DPDecoder(object):
             self.device = 'gpu'
             self.LSTM_dec = tf.contrib.cudnn_rnn.CudnnCompatibleLSTMCell(self.hidden_size)
         else:
-
             self.device = 'cpu'
             self.LSTM_dec = rnn_cell.BasicLSTMCell(self.hidden_size)
 	    self.LSTM_dec = DropoutWrapper(self.LSTM_dec, input_keep_prob=self.keep_prob)
@@ -193,25 +196,29 @@ class DPDecoder(object):
             h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
             # s = start_pos
-            s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
-            # e = end_pos
-            e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
             alphas = [None] * self.num_iterations
             betas = [None] * self.num_iterations
-            us0 = tf.get_variable('us0', shape=(2*self.hidden_size), dtype=tf.float32)
-            ue0 = tf.get_variable('ue0', shape=(2*self.hidden_size), dtype=tf.float32)
+            if self.init_type == "var":
+                us0 = tf.get_variable('us0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
+                ue0 = tf.get_variable('ue0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
+            elif self.init_type == "zero":
+                s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+            # e = end_pos
+                e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+
             for i in range(self.num_iterations):
-                idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
-                s_stk = tf.stack([idx, s], axis=1)
-                e_stk = tf.stack([idx, e], axis=1)
-                if i > 0:
-                  Us = tf.gather_nd(U, s_stk)
-                  Ue = tf.gather_nd(U, e_stk)
+                if self.init_type == "var" and i == 0:
+                    Us = tf.tile(us0, [tf.shape(U)[0], 1])
+                    Ue = tf.tile(ue0, [tf.shape(U)[0], 1])
                 else:
-                  Us = tf.tile(tf.expand_dims(us0, axis=0), [tf.shape(U)[0], 1])
-                  Us = tf.nn.dropout(Us, self.keep_prob)
-                  Ue = tf.tile(tf.expand_dims(ue0, axis=0), [tf.shape(U)[0], 1])
-                  Ue = tf.nn.dropout(Ue, self.keep_prob)
+                    idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
+                    s_stk = tf.stack([idx, s], axis=1)
+                    e_stk = tf.stack([idx, e], axis=1)
+                    Us = tf.gather_nd(U, s_stk)
+                    Ue = tf.gather_nd(U, e_stk)
+
+                Us = tf.nn.dropout(Us, self.keep_prob)
+                Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
               #  hidden = h_state[0]
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
