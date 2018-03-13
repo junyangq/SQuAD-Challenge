@@ -173,11 +173,11 @@ class QAModel(object):
                 self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
         elif self.FLAGS.decoder == "DPD":
-            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
+            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask)
 
         elif self.FLAGS.decoder == "DPDRL":
-            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size)
+            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask, "greedy")
             self.logits_start_sample, self.logits_end_sample, self.ss_hat, self.es_hat, self.s_hat, self.e_hat = tf.cond(self.exists, 
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random", self.ss, self.es),

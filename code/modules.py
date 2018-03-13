@@ -105,7 +105,7 @@ class DPDecoder(object):
 
     """
 
-    def __init__(self, keep_prob, num_iterations, context_len, hidden_size, pool_size):
+    def __init__(self, keep_prob, num_iterations, context_len, hidden_size, pool_size, init_type):
         """
         Inputs:
           hidden_size: int. Hidden size of the RNN
@@ -119,6 +119,7 @@ class DPDecoder(object):
         self.context_len = context_len
         self.hidden_size = hidden_size
         self.pool_size = pool_size
+        self.init_type = init_type
         local_device_protos = device_lib.list_local_devices()
         
         if len([x for x in local_device_protos if x.device_type == 'GPU']) > 0:
@@ -193,25 +194,29 @@ class DPDecoder(object):
             h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
             # s = start_pos
-            s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
-            # e = end_pos
-            e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)  # TODO: random init
             alphas = [None] * self.num_iterations
             betas = [None] * self.num_iterations
-            us0 = tf.get_variable('us0', shape=(2*self.hidden_size), dtype=tf.float32)
-            ue0 = tf.get_variable('ue0', shape=(2*self.hidden_size), dtype=tf.float32)
+            if self.init_type == "var":
+                us0 = tf.get_variable('us0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
+                ue0 = tf.get_variable('ue0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
+            elif self.init_type == "zero":
+                s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+            # e = end_pos
+                e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+
             for i in range(self.num_iterations):
-                idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
-                s_stk = tf.stack([idx, s], axis=1)
-                e_stk = tf.stack([idx, e], axis=1)
-                if i > 0:
-                  Us = tf.gather_nd(U, s_stk)
-                  Ue = tf.gather_nd(U, e_stk)
+                if self.init_type == "var" and i == 0:
+                    Us = tf.tile(us0, [tf.shape(U)[0], 1])
+                    Ue = tf.tile(ue0, [tf.shape(U)[0], 1])
                 else:
-                  Us = tf.tile(tf.expand_dims(us0, axis=0), [tf.shape(U)[0], 1])
-                  Us = tf.nn.dropout(Us, self.keep_prob)
-                  Ue = tf.tile(tf.expand_dims(ue0, axis=0), [tf.shape(U)[0], 1])
-                  Ue = tf.nn.dropout(Ue, self.keep_prob)
+                    idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
+                    s_stk = tf.stack([idx, s], axis=1)
+                    e_stk = tf.stack([idx, e], axis=1)
+                    Us = tf.gather_nd(U, s_stk)
+                    Ue = tf.gather_nd(U, e_stk)
+
+                Us = tf.nn.dropout(Us, self.keep_prob)
+                Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
               #  hidden = h_state[0]
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
