@@ -212,6 +212,13 @@ class DPDecoder(object):
             # e = end_pos
                 e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
 
+            if ss is None:
+                ss = [None] * self.num_iterations
+                es = [None] * self.num_iterations
+                exists = False
+            else:
+                exists = True
+
             for i in range(self.num_iterations):
                 if self.init_type == "var" and i == 0:
                     Us = tf.tile(us0, [tf.shape(U)[0], 1])
@@ -254,8 +261,8 @@ class DPDecoder(object):
                     print "waht is s: ", s
                     s_stk_sample = tf.stack([idx, s], axis=1)
                     e_stk_sample = tf.stack([idx, e], axis=1)
-                    alphas[i] = tf.gather_nd(prob_start, s_stk_sample)
-                    betas[i] = tf.gather_nd(prob_end, e_stk_sample)
+                    alphas[i] = tf.gather_nd(alpha, s_stk_sample)
+                    betas[i] = tf.gather_nd(beta, e_stk_sample)
                 else:
                     raise Exception("Sample type %s not supported." % sample_type)
 
