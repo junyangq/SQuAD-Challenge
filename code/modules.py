@@ -244,8 +244,6 @@ class DPDecoder(object):
                 if sample_type == "greedy":
                     s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
                     e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
-                    alphas[i] = alpha
-                    betas[i] = beta
                 elif sample_type == "random":
                     # s, e = tf.cond(exists, 
                     #     lambda: (ss[i], es[i]), 
@@ -266,10 +264,13 @@ class DPDecoder(object):
                     print "waht is s: ", s
                     s_stk_sample = tf.stack([idx, s], axis=1)
                     e_stk_sample = tf.stack([idx, e], axis=1)
-                    alphas[i] = tf.gather_nd(alpha, s_stk_sample)
-                    betas[i] = tf.gather_nd(beta, e_stk_sample)
+                    # alphas[i] = tf.gather_nd(alpha, s_stk_sample)
+                    # betas[i] = tf.gather_nd(beta, e_stk_sample)
                 else:
                     raise Exception("Sample type %s not supported." % sample_type)
+
+                alphas[i] = alpha
+                betas[i] = beta
 
             if sample_type == "random":
                 if exists:
