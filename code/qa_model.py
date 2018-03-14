@@ -178,7 +178,7 @@ class QAModel(object):
 
         elif self.FLAGS.decoder == "DPDRL":
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
-            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, self.fs, self.fe = decoder.build_graph(attn_output, self.context_mask, "greedy")
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, slf.fs, self.fe = decoder.build_graph(attn_output, self.context_mask, "greedy")
             self.logits_start_sample, self.logits_end_sample, self.ss_hat, self.es_hat, self.s_hat, self.e_hat = tf.cond(self.exists, 
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random", self.ss, self.es),
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random")
@@ -243,7 +243,13 @@ class QAModel(object):
                 self.loss_ce = self.loss + 0.0
                 sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
                 sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
-                rl_loss = -tf.reduce_mean(self.reward * (tf.add_n(self.logits_start_sample) + tf.add_n(self.logits_end_sample)))  # !!!!!!!! not adding self.logits_start_sample
+                self.loss_start_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
+                for i in range(self.FLAGS.DPD_n_iter):
+                    self.loss_start_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start_sample[i], labels=self.ss_hat[i]) # loss_start has shape (batch_size)
+                self.loss_end_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
+                for i in range(self.FLAGS.DPD_n_iter):
+                    self.loss_end_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end_sample[i], labels=self.es_hat[i]) # loss_start has shape (batch_size)
+                rl_loss = -tf.reduce_mean(self.reward * (self.loss_start_sample + self.loss_end_sample))  # !!!!!!!! not adding self.logits_start_sample
                 self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
                         tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
 
