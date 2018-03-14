@@ -95,9 +95,14 @@ class RNNEncoder(object):
 
                 out, _, _ = bidirection_rnn(inputs, input_h, input_c, params)
                 out = tf.transpose(out, perm=[1, 0, 2])
+<<<<<<< HEAD
             
             # Apply dropout
             out = tf.nn.dropout(out, self.keep_prob-0.1)
+=======
+                # Apply dropout
+                out = tf.nn.dropout(out, self.keep_prob)
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
 
             return out
 
@@ -157,6 +162,7 @@ class DPDecoder(object):
 
         r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
 
+        U = tf.nn.dropout(U, self.keep_prob)
         Z11 = tf.tensordot(U, W11, [[2],[2]])  # Z11: (B * m * p * l)
 
         r = tf.nn.dropout(r, self.keep_prob)
@@ -174,6 +180,10 @@ class DPDecoder(object):
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
         Z3 = tf.squeeze(tf.tensordot(concat_mt1_mt2, W3, [[2],[2]]), 3) + b3 # Z3: (B * m * p)
+<<<<<<< HEAD
+=======
+        # Z3 = tf.nn.dropout(Z3, self.keep_prob)
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
 
         logits = tf.reduce_max(Z3, 2)  # out: (B * m)
 
@@ -201,15 +211,25 @@ class DPDecoder(object):
 
             h_state = self.LSTM_dec.zero_state(tf.shape(U)[0], dtype=tf.float32)
 
+<<<<<<< HEAD
             # s = start_pos, e = end_pos
+=======
+            # s = start_pos
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
             alphas = [None] * self.num_iterations
             betas = [None] * self.num_iterations
             if self.init_type == "var":
                 us0 = tf.get_variable('us0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
                 ue0 = tf.get_variable('ue0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
             elif self.init_type == "zero":
+<<<<<<< HEAD
                 us0 = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
                 ue0 = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+=======
+                s = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+            # e = end_pos
+                e = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
             else:
                 raise Exception("Initialization type %s not supported." % self.init_type)
 
@@ -222,7 +242,11 @@ class DPDecoder(object):
 
             idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
             for i in range(self.num_iterations):
+<<<<<<< HEAD
                 if i == 0:
+=======
+                if self.init_type == "var" and i == 0:
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
                     Us = tf.tile(us0, [tf.shape(U)[0], 1])
                     Ue = tf.tile(ue0, [tf.shape(U)[0], 1])
                 else:
@@ -231,7 +255,11 @@ class DPDecoder(object):
                     Us = tf.gather_nd(U, s_stk)
                     Ue = tf.gather_nd(U, e_stk)
 
+<<<<<<< HEAD
                 # already dropped U, Us = tf.nn.dropout(Us, self.keep_prob)
+=======
+                # Us = tf.nn.dropout(Us, self.keep_prob)
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
                 # Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
@@ -521,7 +549,7 @@ class CoAttn(object):
               U = tf.concat([u_fw_out, u_bw_out], 2)
 
             U = U[:,:-1, :]
-            U = tf.nn.dropout(U, self.keep_prob)
+            # U = tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
             
         return U,A_D,A_Q

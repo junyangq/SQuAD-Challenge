@@ -17,89 +17,89 @@
 
 from colorama import Fore, Back, Style
 from vocab import _PAD
-import matplotlib.pyplot as plt
+# import matplotlib.pyplot as plt
 
 # See here for more colorama formatting options:
 # https://pypi.python.org/pypi/colorama
 
-def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn,decS,decE,idx):
-    '''
-    context: for one example, shape=(context_len)
-    qn: np.array of string, shape=(qn_len)
-    decS: np.ndarray, shape=(dec_iter,1,context_len), start dist. from DPD steps
-    decE: same above, for end dist.
-    '''
-    cstart=max(pred_ans_start-15,0)
-    cend=min(pred_ans_end+15,400)
-    contextc=context[cstart:cend]
-    A_D=A_D[cstart:cend]
-    A_Q=A_Q.T[cstart:cend]
-    plt.rcParams["figure.figsize"] = [15,15]
-    plt.subplot(2, 1, 1)
-    plt.imshow(A_D,interpolation='none',cmap='gray')
-    plt.title('C2Q Attention Distribution',fontsize=8)
-    plt.ylabel('Cropped Context',fontsize=8)
-    plt.xlabel('Question',fontsize=8)
-    plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
-    plt.yticks(range(len(contextc)),contextc,fontsize=8)
-    plt.subplot(2, 1, 2)
-    plt.title('Q2C Attention Distribution',fontsize=8)
-    plt.imshow(A_Q,interpolation='none')
-    plt.ylabel('Cropped Context',fontsize=8)
-    plt.xlabel('Question',fontsize=8)
-    plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
-    plt.yticks(range(len(contextc)),contextc,fontsize=8)
-    plt.tight_layout()
-    plt.show()
-    cstart=max(pred_ans_start-25,0)
-    cend=min(pred_ans_end+25,400)
-    plt.rcParams["figure.figsize"] = [15,8]
-    plt.subplot(8,1,1)
-    plt.title('start/end dist. from dynamic decoder at step 1',fontsize=8)
-    decS0=decS[0][idx][cstart:cend]
-    plt.imshow(decS0,interpolation='none',aspect=5)
-    plt.xticks(range(len(context)),context,rotation='vertical',fontsize=8)
-    plt.yticks([])
-    plt.subplot(8,1,2)
-    decE0=decE[0][idx][cstart:cend]
-    plt.imshow(decE0,interpolation='none')
-    plt.xticks([])
-    plt.yticks([])
-    plt.subplot(8,1,3)
-    plt.title('start/end dist. at step 2',fontsize=8)
-    decS1=decS[1][idx][cstart:cend]
-    plt.imshow(decS1,interpolation='none')
-    plt.xticks([])
-    plt.yticks([])
-    plt.subplot(8,1,4)
-    decE1=decE[1][idx][cstart:cend]
-    plt.imshow(decE1,interpolation='none')
-    plt.xticks([])
-    plt.yticks([])
-    plt.subplot(8,1,5)
-    plt.title('start/end dist. at step 3',fontsize=8)
-    decS2=decS[2][idx][cstart:cend]
-    plt.imshow(decS[2],interpolation='none')
-    plt.xticks([])
-    plt.yticks([])
-    plt.subplot(8,1,6)
-    decE2=decE[2][idx][cstart:cend]
-    plt.imshow(decE2,interpolation='none')
-    plt.xticks([])
-    plt.yticks([])
-    plt.subplot(8,1,7)
-    plt.title('start/end dist. at step 4',fontsize=8)
-    decS3=decS[3][idx][cstart:cend]
-    plt.imshow(decS3,interpolation='none')
-    plt.xticks([])
-    plt.yticks([])
-    plt.subplot(8,1,8)
-    decE3=decE[3][idx][cstart:cend]
-    plt.imshow(decE3,interpolation='none')
-    plt.xticks([])
-    plt.yticks([])
-    plt.tight_layout()
-    plt.show()
+# def plot_CoAttn(pred_ans_start,pred_ans_end,A_D,A_Q,context,qn,decS,decE,idx):
+#     '''
+#     context: for one example, shape=(context_len)
+#     qn: np.array of string, shape=(qn_len)
+#     decS: np.ndarray, shape=(dec_iter,1,context_len), start dist. from DPD steps
+#     decE: same above, for end dist.
+#     '''
+#     cstart=max(pred_ans_start-15,0)
+#     cend=min(pred_ans_end+15,400)
+#     contextc=context[cstart:cend]
+#     A_D=A_D[cstart:cend]
+#     A_Q=A_Q.T[cstart:cend]
+#     plt.rcParams["figure.figsize"] = [15,15]
+#     plt.subplot(2, 1, 1)
+#     plt.imshow(A_D,interpolation='none',cmap='gray')
+#     plt.title('C2Q Attention Distribution',fontsize=8)
+#     plt.ylabel('Cropped Context',fontsize=8)
+#     plt.xlabel('Question',fontsize=8)
+#     plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
+#     plt.yticks(range(len(contextc)),contextc,fontsize=8)
+#     plt.subplot(2, 1, 2)
+#     plt.title('Q2C Attention Distribution',fontsize=8)
+#     plt.imshow(A_Q,interpolation='none')
+#     plt.ylabel('Cropped Context',fontsize=8)
+#     plt.xlabel('Question',fontsize=8)
+#     plt.xticks(range(len(qn)),qn,rotation='vertical',fontsize=8)
+#     plt.yticks(range(len(contextc)),contextc,fontsize=8)
+#     plt.tight_layout()
+#     plt.show()
+#     cstart=max(pred_ans_start-25,0)
+#     cend=min(pred_ans_end+25,400)
+#     plt.rcParams["figure.figsize"] = [15,8]
+#     plt.subplot(8,1,1)
+#     plt.title('start/end dist. from dynamic decoder at step 1',fontsize=8)
+#     decS0=decS[0][idx][cstart:cend]
+#     plt.imshow(decS0,interpolation='none',aspect=5)
+#     plt.xticks(range(len(context)),context,rotation='vertical',fontsize=8)
+#     plt.yticks([])
+#     plt.subplot(8,1,2)
+#     decE0=decE[0][idx][cstart:cend]
+#     plt.imshow(decE0,interpolation='none')
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.subplot(8,1,3)
+#     plt.title('start/end dist. at step 2',fontsize=8)
+#     decS1=decS[1][idx][cstart:cend]
+#     plt.imshow(decS1,interpolation='none')
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.subplot(8,1,4)
+#     decE1=decE[1][idx][cstart:cend]
+#     plt.imshow(decE1,interpolation='none')
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.subplot(8,1,5)
+#     plt.title('start/end dist. at step 3',fontsize=8)
+#     decS2=decS[2][idx][cstart:cend]
+#     plt.imshow(decS[2],interpolation='none')
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.subplot(8,1,6)
+#     decE2=decE[2][idx][cstart:cend]
+#     plt.imshow(decE2,interpolation='none')
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.subplot(8,1,7)
+#     plt.title('start/end dist. at step 4',fontsize=8)
+#     decS3=decS[3][idx][cstart:cend]
+#     plt.imshow(decS3,interpolation='none')
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.subplot(8,1,8)
+#     decE3=decE[3][idx][cstart:cend]
+#     plt.imshow(decE3,interpolation='none')
+#     plt.xticks([])
+#     plt.yticks([])
+#     plt.tight_layout()
+#     plt.show()
 
 
 def yellowtext(s):

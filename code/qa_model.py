@@ -250,12 +250,33 @@ class QAModel(object):
                 self.loss = self.loss / (2.0 * self.sigma_ce * self.sigma_ce) + rl_loss / (2.0 * self.sigma_rl * self.sigma_rl) + \
                         tf.log(self.sigma_ce * self.sigma_ce) + tf.log(self.sigma_rl * self.sigma_rl)
 
+<<<<<<< HEAD
                 tf.summary.scalar('loss', self.loss_ce)
                 tf.summary.scalar('loss_tot', self.loss)
 
             else:
                 # Add the two losses
                 self.loss = self.loss_start + self.loss_end
+=======
+            if self.FLAGS.decoder == "DPDRL":
+                self.loss_ce = self.loss + 0.0
+                sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
+                sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
+                self.loss_start_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
+                for i in range(self.FLAGS.DPD_n_iter):
+                    self.loss_start_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start_sample[i], labels=self.ss_hat[i]) # loss_start has shape (batch_size)
+                self.loss_end_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
+                for i in range(self.FLAGS.DPD_n_iter):
+                    self.loss_end_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end_sample[i], labels=self.es_hat[i]) # loss_start has shape (batch_size)
+                rl_loss = -tf.reduce_mean(self.reward * (self.loss_start_sample + self.loss_end_sample))  # !!!!!!!! not adding self.logits_start_sample
+                self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
+                        tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
+
+                tf.summary.scalar('loss', self.loss_ce)
+                tf.summary.scalar('loss_tot', self.loss)
+
+            else:
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
                 tf.summary.scalar('loss', self.loss)
 
 
@@ -288,16 +309,25 @@ class QAModel(object):
             input_feed[self.ss]=np.zeros([self.FLAGS.DPD_n_iter, 1])
 
         # output_feed contains the things we want to fetch.
+<<<<<<< HEAD
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm, self.loss_ce, self.sigma_ce, self.sigma_rl]
+=======
+        output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
 
         if self.FLAGS.decoder == "DPDRL":
             output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat, self.fs, self.fe]
             [ss_hat, es_hat, s_hat, e_hat, fs, fe]=session.run(output_feed_temp, input_feed)
+<<<<<<< HEAD
             
             delta=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens) -  \
                                     self.Reward(fs, fe, batch.ans_span,batch.context_tokens)
            # print "relative reward:", delta
 	    input_feed[self.reward] = delta
+=======
+            input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens) -  \
+                                    self.Reward(fs, fe, batch.ans_span,batch.context_tokens)
+>>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
             input_feed[self.exists]=True
             input_feed[self.ss]=ss_hat
             input_feed[self.es]=es_hat
