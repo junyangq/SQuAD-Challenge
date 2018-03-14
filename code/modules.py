@@ -279,7 +279,7 @@ class DPDecoder(object):
                     # print "shapeeeeeee:", tf.shape(tf.concat(ss, axis=0))
                     return alphas, betas, tf.concat(ss, axis=0), tf.concat(es,axis=0), s, e
             else:
-                return alphas, betas, prob_start, prob_end  # alpha, beta, prob_start, prob_end: (B * m)
+                return alphas, betas, prob_start, prob_end, s, e  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 
