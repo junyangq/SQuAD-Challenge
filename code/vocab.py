@@ -47,7 +47,7 @@ def get_glove(glove_path, glove_dim):
 
     print "Loading GLoVE vectors from file: %s" % glove_path
     if os.path.basename(glove_path) == "glove.840B.300d.txt":
-        vocab_size = int(2.2e6)
+        vocab_size = int(2196017)
     else:
         vocab_size = int(4e5) # this is the vocab size of the corpus we've downloaded
 
@@ -66,6 +66,8 @@ def get_glove(glove_path, glove_dim):
         word2id[word] = idx
         id2word[idx] = word
         idx += 1
+    print 'word2id len:', len(word2id)
+    print 'id2word len:', len(id2word)
 
     # go through glove vecs
     with open(glove_path, 'r') as fh:
@@ -76,13 +78,14 @@ def get_glove(glove_path, glove_dim):
             if glove_dim != len(vector):
                 raise Exception("You set --glove_path=%s but --embedding_size=%i. If you set --glove_path yourself then make sure that --embedding_size matches!" % (glove_path, glove_dim))
             emb_matrix[idx, :] = vector
-            word2id[word] = idx
-            id2word[idx] = word
-            idx += 1
+            if word not in word2id:
+                word2id[word] = idx
+                id2word[idx] = word
+                idx += 1
 
     final_vocab_size = vocab_size + len(_START_VOCAB)
-    assert len(word2id) == final_vocab_size
-    assert len(id2word) == final_vocab_size
-    assert idx == final_vocab_size
+    assert len(word2id) == final_vocab_size - (os.path.basename(glove_path) == "glove.840B.300d.txt")
+    assert len(id2word) == final_vocab_size - (os.path.basename(glove_path) == "glove.840B.300d.txt")
+    assert idx == final_vocab_size - (os.path.basename(glove_path) == "glove.840B.300d.txt")
 
     return emb_matrix, word2id, id2word
