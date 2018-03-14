@@ -147,7 +147,7 @@ class QAModel(object):
             attn_output,self.A_D,self.A_Q = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*4)
         elif self.FLAGS.attention == "drcoattn":
             attn_layer = DCNplusEncoder(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
-            attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens)
+            attn_output,self.A_D,self.A_Q = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens)
         else:
             raise Exception("Attention mode %s not supported." % self.FLAGS.attention)
 	

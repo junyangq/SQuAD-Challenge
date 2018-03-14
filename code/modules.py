@@ -645,7 +645,7 @@ class DCNplusEncoder(object):
             )
             encoding = tf.concat(outputs, 2)
             encoding = encoding[:, :-1, :]
-            return encoding
+            return encoding, None,None
 
 
 def concat_sentinel(sentinel_name, original_tensor, size):
