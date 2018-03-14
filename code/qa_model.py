@@ -274,8 +274,8 @@ class QAModel(object):
         input_feed[self.keep_prob] = 1.0 - self.FLAGS.dropout # apply dropout
         if self.FLAGS.decoder == "DPDRL":
             input_feed[self.exists] = False
-            input_feed[self.es]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
-            input_feed[self.ss]=np.array([[1e-10],[1e-10],[1e-10],[1e-10]])
+            input_feed[self.es]=np.zeros([self.FLAGS.DPD_n_iter, 1])
+            input_feed[self.ss]=np.array([self.FLAGS.DPD_n_iter, 1])
 
         # output_feed contains the things we want to fetch.
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
