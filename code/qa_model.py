@@ -174,11 +174,11 @@ class QAModel(object):
 
         elif self.FLAGS.decoder == "DPD":
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
-            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask)
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, _, _ = decoder.build_graph(attn_output, self.context_mask)
 
         elif self.FLAGS.decoder == "DPDRL":
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
-            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end = decoder.build_graph(attn_output, self.context_mask, "greedy")
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, self.fs, self.fe = decoder.build_graph(attn_output, self.context_mask, "greedy")
             self.logits_start_sample, self.logits_end_sample, self.ss_hat, self.es_hat, self.s_hat, self.e_hat = tf.cond(self.exists, 
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random", self.ss, self.es),
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random")
@@ -282,9 +282,10 @@ class QAModel(object):
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
 
         if self.FLAGS.decoder == "DPDRL":
-            output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat]
-            [ss_hat, es_hat, s_hat, e_hat]=session.run(output_feed_temp, input_feed)
-            input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens)
+            output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat, self.fs, self.fe]
+            [ss_hat, es_hat, s_hat, e_hat, fs, fe]=session.run(output_feed_temp, input_feed)
+            input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens) -  \
+                                    self.Reward(fs, fe, batch.ans_span,batch.context_tokens)
             input_feed[self.exists]=True
             input_feed[self.ss]=ss_hat
             input_feed[self.es]=es_hat
