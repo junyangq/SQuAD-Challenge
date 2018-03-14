@@ -250,14 +250,13 @@ class QAModel(object):
                 self.loss = self.loss / (2.0 * self.sigma_ce * self.sigma_ce) + rl_loss / (2.0 * self.sigma_rl * self.sigma_rl) + \
                         tf.log(self.sigma_ce * self.sigma_ce) + tf.log(self.sigma_rl * self.sigma_rl)
 
-<<<<<<< HEAD
                 tf.summary.scalar('loss', self.loss_ce)
                 tf.summary.scalar('loss_tot', self.loss)
 
             else:
                 # Add the two losses
                 self.loss = self.loss_start + self.loss_end
-=======
+
             if self.FLAGS.decoder == "DPDRL":
                 self.loss_ce = self.loss + 0.0
                 sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
@@ -276,7 +275,6 @@ class QAModel(object):
                 tf.summary.scalar('loss_tot', self.loss)
 
             else:
->>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
                 tf.summary.scalar('loss', self.loss)
 
 
@@ -309,34 +307,27 @@ class QAModel(object):
             input_feed[self.ss]=np.zeros([self.FLAGS.DPD_n_iter, 1])
 
         # output_feed contains the things we want to fetch.
-<<<<<<< HEAD
-        output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm, self.loss_ce, self.sigma_ce, self.sigma_rl]
-=======
         output_feed = [self.updates, self.summaries, self.loss, self.global_step, self.param_norm, self.gradient_norm]
->>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
-
         if self.FLAGS.decoder == "DPDRL":
             output_feed_temp = [self.ss_hat, self.es_hat, self.s_hat,self.e_hat, self.fs, self.fe]
             [ss_hat, es_hat, s_hat, e_hat, fs, fe]=session.run(output_feed_temp, input_feed)
-<<<<<<< HEAD
             
             delta=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens) -  \
                                     self.Reward(fs, fe, batch.ans_span,batch.context_tokens)
            # print "relative reward:", delta
 	    input_feed[self.reward] = delta
-=======
             input_feed[self.reward]=self.Reward(s_hat,e_hat,batch.ans_span,batch.context_tokens) -  \
                                     self.Reward(fs, fe, batch.ans_span,batch.context_tokens)
->>>>>>> 47897dc799f30854bc0cd81b5e5fb4f47b40051b
             input_feed[self.exists]=True
             input_feed[self.ss]=ss_hat
             input_feed[self.es]=es_hat
+            [_, summaries, loss, global_step, param_norm, gradient_norm]= session.run(output_feed, input_feed)
+
+
         # Run the model
-        [_, summaries, loss, global_step, param_norm, gradient_norm, loss_ce, sigma_ce, sigma_rl] = session.run(output_feed, input_feed)
+        [_, summaries, loss, global_step, param_norm, gradient_norm] = session.run(output_feed, input_feed)
         
-        print "(sigma_ce, sigma_rl): ", sigma_ce, sigma_rl
-        print "CE loss: ", loss_ce
-        # All summaries in the graph are added to Tensorboard
+                # All summaries in the graph are added to Tensorboard
         summary_writer.add_summary(summaries, global_step)
 
         return loss, global_step, param_norm, gradient_norm
