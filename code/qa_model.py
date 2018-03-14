@@ -240,6 +240,7 @@ class QAModel(object):
             self.loss = self.loss_start + self.loss_end
 
             if self.FLAGS.decoder == "DPDRL":
+                self.loss.ce = self.loss + 0.0
                 sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
                 sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
                 rl_loss = -tf.reduce_mean(self.reward * (tf.add_n(self.logits_start_sample) + tf.add_n(self.logits_end_sample)))  # !!!!!!!! not adding self.logits_start_sample
@@ -338,7 +339,10 @@ class QAModel(object):
         input_feed[self.ans_span] = batch.ans_span
         # note you don't supply keep_prob here, so it will default to 1 i.e. no dropout
 
-        output_feed = [self.loss]
+        if self.FLAGS.decoder == "DPDRL":
+            output_feed = [self.loss_ce]
+        else:
+            output_feed = [self.loss]
 
         [loss] = session.run(output_feed, input_feed)
 
