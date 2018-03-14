@@ -20,6 +20,7 @@ from __future__ import division
 
 from tqdm import tqdm
 import numpy as np
+import os
 
 _PAD = b"<pad>"
 _UNK = b"<unk>"
@@ -45,7 +46,7 @@ def get_glove(glove_path, glove_dim):
     """
 
     print "Loading GLoVE vectors from file: %s" % glove_path
-    if os.path.basename(your_path) == "glove.840B.300d.txt":
+    if os.path.basename(glove_path) == "glove.840B.300d.txt":
         vocab_size = int(2.2e6)
     else:
         vocab_size = int(4e5) # this is the vocab size of the corpus we've downloaded
