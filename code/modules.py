@@ -224,12 +224,12 @@ class DPDecoder(object):
             else:
                 exists = True
 
+            idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
             for i in range(self.num_iterations):
                 if self.init_type == "var" and i == 0:
                     Us = tf.tile(us0, [tf.shape(U)[0], 1])
                     Ue = tf.tile(ue0, [tf.shape(U)[0], 1])
                 else:
-                    idx = tf.range(0, tf.shape(U)[0], dtype=tf.int32)
                     s_stk = tf.stack([idx, s], axis=1)
                     e_stk = tf.stack([idx, e], axis=1)
                     Us = tf.gather_nd(U, s_stk)
