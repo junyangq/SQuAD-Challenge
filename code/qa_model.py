@@ -253,7 +253,11 @@ class QAModel(object):
                 self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
                         tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
 
-            tf.summary.scalar('loss', self.loss)
+                tf.summary.scalar('loss', self.loss_ce)
+                tf.summary.scalar('loss_tot', self.loss)
+
+            else:
+                tf.summary.scalar('loss', self.loss)
 
 
     def run_train_iter(self, session, batch, summary_writer):
