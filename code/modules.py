@@ -208,8 +208,8 @@ class DPDecoder(object):
                 us0 = tf.get_variable('us0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
                 ue0 = tf.get_variable('ue0', shape=[1, 2*self.hidden_size], dtype=tf.float32)
             elif self.init_type == "zero":
-                us0 = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
-                ue0 = tf.zeros(shape=[tf.shape(U)[0]], dtype=tf.int32)
+                us0 = tf.zeros(shape=[1, 2*self.hidden_size], dtype=tf.float32)
+                ue0 = tf.zeros(shape=[1, 2*self.hidden_size], dtype=tf.float32)
             else:
                 raise Exception("Initialization type %s not supported." % self.init_type)
 
@@ -605,36 +605,53 @@ class DCNplusEncoder(object):
             print('D length is: ', D_length)
 
             size = int(self.value_vec_size)
-            cell = tf.nn.rnn_cell.BasicLSTMCell(size)
-            cell = DropoutWrapper(cell, input_keep_prob=self.keep_prob)
-            Q_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
-                cell_fw = cell,
-                cell_bw = cell,
-                dtype = tf.float32,
-                inputs = S_Q_1,
-    #            sequence_length = Q_length
-            )
-            E_Q_2 = tf.concat(Q_fw_bw_encodings, 2)
 
+            if self.device == 'gpu':
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, 2*size, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                S_Q_1 = tf.transpose(S_Q_1, perm=[1, 0, 2])
+                print 'S_Q_1 shape', S_Q_1.shape
+                input_h = tf.zeros([2, tf.shape(values)[0], size])
+                input_c = tf.zeros([2, tf.shape(values)[0], size])
+                params = tf.get_variable("RNN", shape=(estimate_cudnn_parameter_size(self.value_vec_size, size, 2)),
+                    initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+                E_Q_2 , _, _ = bidirection_rnn(S_Q_1, input_h, input_c, params)
+                print 'E_Q_2  shape:', E_Q_2 .shape
+                E_Q_2 = tf.transpose(E_Q_2 , perm=[1, 0, 2])
+                E_Q_2 = tf.nn.dropout(E_Q_2, self.keep_prob)
+
+            else:
+              cell = tf.nn.rnn_cell.BasicLSTMCell(size)
+              cell = DropoutWrapper(cell, input_keep_prob=self.keep_prob)
+              Q_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
+                  cell_fw = cell,
+                  cell_bw = cell,
+                  dtype = tf.float32,
+                  inputs = S_Q_1,
+                # sequence_length = Q_length
+              )
+              E_Q_2 = tf.concat(Q_fw_bw_encodings, 2)
+
+	# add gpu lstm
             D_fw_bw_encodings, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw = cell,
                 cell_bw = cell,
                 dtype = tf.float32,
                 inputs = S_D_1,
-     #           sequence_length = D_length
+              # sequence_length = D_length
             )    
             E_D_2 = tf.concat(D_fw_bw_encodings, 2)
 
         with vs.variable_scope('coattention_layer_2'):
             S_D_2, S_Q_2, C_D_2 = coattention(\
                 E_Q_2, Q_length, E_D_2, D_length, values_mask, keys_mask, use_mask)
- 
 
         with vs.variable_scope('final_encoder'):
             document_representations = tf.concat(\
                 [D, E_D_2, S_D_1, S_D_2, C_D_1, C_D_2], 2)#(N, D, 2H)
 
             size = int(self.value_vec_size)
+
+	# add gpu lstm
             cell = tf.nn.rnn_cell.BasicLSTMCell(size)
             outputs, _ = tf.nn.bidirectional_dynamic_rnn(
                 cell_fw = cell,
@@ -644,6 +661,7 @@ class DCNplusEncoder(object):
   #              sequence_length = D_length,
             )
             encoding = tf.concat(outputs, 2)
+
             encoding = encoding[:, :-1, :]
             return encoding, None,None
 
