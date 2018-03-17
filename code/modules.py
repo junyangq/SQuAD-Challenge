@@ -56,11 +56,14 @@ class RNNEncoder(object):
         else:
             self.device = 'cpu'
         #self.rnn_cell_fw = tf.contrib.rnn.LSTMBlockCell(self.hidden_size, reuse=tf.AUTO_REUSE)
-            self.rnn_cell_fw = rnn_cell.BasicLSTMCell(self.hidden_size)
-            self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
-        #self.rnn_cell_bw = tf.contrib.rnn.LSTMBlockCell(self.hidden_size, reuse=tf.AUTO_REUSE)
-            self.rnn_cell_bw = rnn_cell.BasicLSTMCell(self.hidden_size)
-            self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
+        #     self.rnn_cell_fw = rnn_cell.BasicLSTMCell(self.hidden_size)
+        #     self.rnn_cell_fw = DropoutWrapper(self.rnn_cell_fw, input_keep_prob=self.keep_prob)
+        # #self.rnn_cell_bw = tf.contrib.rnn.LSTMBlockCell(self.hidden_size, reuse=tf.AUTO_REUSE)
+        #     self.rnn_cell_bw = rnn_cell.BasicLSTMCell(self.hidden_size)
+        #     self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
+
+            self.rnn_cell = rnn_cell.BasicLSTMCell(self.hidden_size)
+            self.rnn_cell = DropoutWrapper(self.rnn_cell, input_keep_prob=self.keep_prob)
 
     def build_graph(self, inputs, masks):
         """
@@ -76,21 +79,40 @@ class RNNEncoder(object):
         """
         with vs.variable_scope("RNNEncoder", reuse=tf.AUTO_REUSE):
 
+            # if self.device == 'cpu':
+            #     input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
+            # # Note: fw_out and bw_out are the hidden states for every timestep.
+            # # Each is shape (batch_size, seq_len, hidden_size).
+            #     (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw, self.rnn_cell_bw, inputs, input_lens, dtype=tf.float32)
+            # # Concatenate the forward and backward hidden states
+            #     out = tf.concat([fw_out, bw_out], 2)
+            # else:
+            #     size = int(self.hidden_size)
+            #     bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+            #     # inputs = tf.transpose(inputs, perm=[1,0,2])
+            #     input_h = tf.zeros([2, tf.shape(inputs)[0], size])
+            #     input_c = tf.zeros([2, tf.shape(inputs)[0], size])
+            #     inputs = tf.transpose(inputs, perm=[1,0,2])
+            #     params = tf.get_variable("RNNEncoder", shape=(estimate_cudnn_parameter_size(self.embed_size, size, 2)),
+            #         initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
+
+            #     out, _, _ = bidirection_rnn(inputs, input_h, input_c, params)
+            #     out = tf.transpose(out, perm=[1, 0, 2])
+
             if self.device == 'cpu':
                 input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
             # Note: fw_out and bw_out are the hidden states for every timestep.
             # Each is shape (batch_size, seq_len, hidden_size).
-                (fw_out, bw_out), _ = tf.nn.bidirectional_dynamic_rnn(self.rnn_cell_fw, self.rnn_cell_bw, inputs, input_lens, dtype=tf.float32)
+                out, _ = tf.nn.dynamic_rnn(self.self.rnn_cell, inputs, input_lens, dtype=tf.float32)
             # Concatenate the forward and backward hidden states
-                out = tf.concat([fw_out, bw_out], 2)
             else:
                 size = int(self.hidden_size)
-                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_BIDIRECTION, dtype=tf.float32)
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_UNIDIRECTION, dtype=tf.float32)
                 # inputs = tf.transpose(inputs, perm=[1,0,2])
-                input_h = tf.zeros([2, tf.shape(inputs)[0], size])
-                input_c = tf.zeros([2, tf.shape(inputs)[0], size])
+                input_h = tf.zeros([1, tf.shape(inputs)[0], size])
+                input_c = tf.zeros([1, tf.shape(inputs)[0], size])
                 inputs = tf.transpose(inputs, perm=[1,0,2])
-                params = tf.get_variable("RNNEncoder", shape=(estimate_cudnn_parameter_size(self.embed_size, size, 2)),
+                params = tf.get_variable("RNNEncoder", shape=(estimate_cudnn_parameter_size(self.embed_size, size, 1)),
                     initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
 
                 out, _, _ = bidirection_rnn(inputs, input_h, input_c, params)
@@ -441,11 +463,11 @@ class CoAttn(object):
             # Compute projected question hidden states
 
             Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
-            Q = tf.nn.dropout(Q, self.keep_prob)
-            print('Q shape is: ', Q.shape)
+
 
             Q = concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
-
+            Q = tf.nn.dropout(Q, self.keep_prob)
+            print('Q shape is: ', Q.shape)
             # sentinel = tf.get_variable(name='question_sentinel', shape=tf.shape(Q)[2], \
             #     initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
             # sentinel = tf.tile(sentinel, [tf.shape(original_tensor)[0], 1, 1])
@@ -453,8 +475,8 @@ class CoAttn(object):
 
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
-            D = tf.nn.dropout(D, self.keep_prob)
             D = concat_sentinel('document_sentinel', D, self.value_vec_size)
+            D = tf.nn.dropout(D, self.keep_prob)
 
             # key = document, value = question here
             ### End your code here to implement 'Sentinel Vector'
@@ -767,4 +789,4 @@ def estimate_cudnn_parameter_size(input_size, hidden_size, direction):
     construct a stack of LSTMs. 
     """
     single_rnn_size = 8 * hidden_size + 4 * (hidden_size * input_size) + 4 * (hidden_size * hidden_size)
-    return 2 * single_rnn_size
+    return direction * single_rnn_size
