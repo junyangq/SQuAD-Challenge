@@ -143,7 +143,7 @@ class QAModel(object):
             attn_layer = BasicAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
             _, attn_output = attn_layer.build_graph(question_hiddens, self.qn_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*2)
         elif self.FLAGS.attention == "coattn":
-            attn_layer = CoAttn(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
+            attn_layer = CoAttn(self.keep_prob, self.FLAGS.hidden_size, self.FLAGS.hidden_size)
             attn_output,self.A_D,self.A_Q = attn_layer.build_graph(question_hiddens, self.qn_mask, self.context_mask, context_hiddens) # attn_output is shape (batch_size, context_len, hidden_size*4)
         elif self.FLAGS.attention == "drcoattn":
             attn_layer = DCNplusEncoder(self.keep_prob, self.FLAGS.hidden_size*2, self.FLAGS.hidden_size*2)
@@ -173,7 +173,7 @@ class QAModel(object):
                 self.logits_end, self.probdist_end = softmax_layer_end.build_graph(blended_reps_final, self.context_mask)
 
         elif self.FLAGS.decoder == "DPD":
-            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
+            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, _, _ = decoder.build_graph(attn_output, self.context_mask)
 
         elif self.FLAGS.decoder == "DPDRL":
