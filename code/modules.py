@@ -256,7 +256,7 @@ class DPDecoder(object):
                 # already dropped U, Us = tf.nn.dropout(Us, self.keep_prob)
                 # Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
-                h_state = tf.nn.dropout(h_state, self.keep_prob)
+                h_state = [tf.nn.dropout(h_state[0], self.keep_prob), tf.nn.dropout(h_state[1], self.keep_prob)]
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
 
