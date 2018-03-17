@@ -107,11 +107,11 @@ class RNNEncoder(object):
             # Concatenate the forward and backward hidden states
             else:
                 size = int(self.hidden_size)
-                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0.2, direction=cudnn_rnn_ops.CUDNN_RNN_UNIDIRECTION, dtype=tf.float32)
+                bidirection_rnn = tf.contrib.cudnn_rnn.CudnnLSTM(1, size, self.embed_size, dropout=0., direction=cudnn_rnn_ops.CUDNN_RNN_UNIDIRECTION, dtype=tf.float32)
                 # inputs = tf.transpose(inputs, perm=[1,0,2])
                 input_h = tf.zeros([1, tf.shape(inputs)[0], size])
                 input_c = tf.zeros([1, tf.shape(inputs)[0], size])
-                inputs = tf.transpose(inputs, perm=[1,0,2])
+                inputs = tf.nn.dropout(tf.transpose(inputs, perm=[1,0,2]), self.keep_prob)
                 params = tf.get_variable("RNNEncoder", shape=(estimate_cudnn_parameter_size(self.embed_size, size, 1)),
                     initializer=tf.contrib.layers.xavier_initializer(), dtype=tf.float32)
 
@@ -119,7 +119,7 @@ class RNNEncoder(object):
                 out = tf.transpose(out, perm=[1, 0, 2])
             
             # Apply dropout
-            out = tf.nn.dropout(out, self.keep_prob-0.1)
+            out = tf.nn.dropout(out, self.keep_prob)
             return out
 
 
@@ -162,7 +162,7 @@ class DPDecoder(object):
       Inputs:
         U: batch * m * 2l
       '''
-      with tf.variable_scope(scope, reuse=tf.AUTO_REUSE):
+      with tf.variable_scope(scope):
         xavier = tf.contrib.layers.xavier_initializer()
         W11 = tf.get_variable('W11',shape=[self.pool_size, self.hidden_size, 2*self.hidden_size], initializer=xavier, dtype=tf.float32)
         W12 = tf.get_variable('W12',shape=[self.pool_size, self.hidden_size, self.hidden_size], initializer=xavier, dtype=tf.float32)
@@ -256,6 +256,7 @@ class DPDecoder(object):
                 # already dropped U, Us = tf.nn.dropout(Us, self.keep_prob)
                 # Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
+                h_state = tf.nn.dropout(h_state, self.keep_prob)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
 
