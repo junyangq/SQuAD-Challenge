@@ -174,7 +174,7 @@ class DPDecoder(object):
         b3 = tf.get_variable('b3',shape=[self.pool_size], initializer=tf.zeros_initializer(), dtype=tf.float32)
 
         concat_h_us_ue = tf.concat([hi, us, ue], axis=1)
-        concat_h_us_ue = tf.nn.dropout(concat_h_us_ue, self.keep_prob)
+        # concat_h_us_ue = tf.nn.dropout(concat_h_us_ue, self.keep_prob)
 
         r = tf.tanh(tf.tensordot(concat_h_us_ue, WD, [[1],[1]]))  # r: (B * l)
 
@@ -256,7 +256,8 @@ class DPDecoder(object):
                 # already dropped U, Us = tf.nn.dropout(Us, self.keep_prob)
                 # Ue = tf.nn.dropout(Ue, self.keep_prob)
                 hidden, h_state = self.LSTM_dec(tf.concat([Us, Ue], axis=1), h_state)
-                h_state = [tf.nn.dropout(h_state[0], self.keep_prob), tf.nn.dropout(h_state[1], self.keep_prob)]
+                # h_state = [tf.nn.dropout(h_state[0], self.keep_prob), tf.nn.dropout(h_state[1], self.keep_prob)]
+                hidden = tf.nn.dropout(hidden, self.keep_prob)
                 alpha, prob_start = self.HMN(U, hidden, Us, Ue, context_mask, scope="start")
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
 
@@ -467,7 +468,7 @@ class CoAttn(object):
 
 
             Q = concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
-            Q = tf.nn.dropout(Q, self.keep_prob)
+            # Q = tf.nn.dropout(Q, self.keep_prob)
             print('Q shape is: ', Q.shape)
             # sentinel = tf.get_variable(name='question_sentinel', shape=tf.shape(Q)[2], \
             #     initializer=tf.contrib.layers.xavier_initializer(), dtype = tf.float32)
@@ -477,7 +478,7 @@ class CoAttn(object):
             print('Q shape is: ', Q.shape)
             D = keys # (batch_size, num_keys, value_vec_size)
             D = concat_sentinel('document_sentinel', D, self.value_vec_size)
-            D = tf.nn.dropout(D, self.keep_prob)
+            # D = tf.nn.dropout(D, self.keep_prob)
 
             # key = document, value = question here
             ### End your code here to implement 'Sentinel Vector'
@@ -543,7 +544,7 @@ class CoAttn(object):
                   inputs=C_D, dtype = tf.float32)
               U = tf.concat([u_fw_out, u_bw_out], 2)
 
-            U = U[:,:-1, :]
+            U = tf.nn.dropout(U[:,:-1, :], self.keep_prob)
             # U = tf.nn.dropout(U, self.keep_prob)
             print('U shape is: ', U.shape)
             
