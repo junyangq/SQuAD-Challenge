@@ -464,7 +464,7 @@ class CoAttn(object):
 
             # Compute projected question hidden states
 
-            Q = tf.tanh(tf.tensordot(values, W, 1) + tf.reshape(b, [1, 1, self.value_vec_size]) # (batch_size, num_values, value_vec_size)
+            Q = tf.tanh(tf.tensordot(values, W, 1) + tf.reshape(b, [1, 1, self.value_vec_size])) # (batch_size, num_values, value_vec_size)
 
 
             Q = concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
