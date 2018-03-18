@@ -460,11 +460,11 @@ class CoAttn(object):
             # Declare variable 
             W = tf.get_variable("W", shape = (self.value_vec_size, self.value_vec_size), \
                 initializer = tf.contrib.layers.xavier_initializer())
-            b = tf.get_variable("b", shape = (values.shape[1], self.value_vec_size), initializer = tf.constant_initializer(0))
+            b = tf.get_variable("b", shape = (self.value_vec_size), initializer = tf.constant_initializer(0))
 
             # Compute projected question hidden states
 
-            Q = tf.tanh(tf.tensordot(values, W, 1) + tf.expand_dims(b, axis=0)) # (batch_size, num_values, value_vec_size)
+            Q = tf.tanh(tf.tensordot(values, W, 1) + tf.reshape(b, [1, 1, self.value_vec_size]) # (batch_size, num_values, value_vec_size)
 
 
             Q = concat_sentinel('question_sentinel', Q, self.value_vec_size)  # (batch_size, num_values, value_vec_size)
