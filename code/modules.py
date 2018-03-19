@@ -103,7 +103,7 @@ class RNNEncoder(object):
                 input_lens = tf.reduce_sum(masks, reduction_indices=1) # shape (batch_size)
             # Note: fw_out and bw_out are the hidden states for every timestep.
             # Each is shape (batch_size, seq_len, hidden_size).
-                out, _ = tf.nn.dynamic_rnn(self.self.rnn_cell, inputs, input_lens, dtype=tf.float32)
+                out, _ = tf.nn.dynamic_rnn(self.rnn_cell, inputs, input_lens, dtype=tf.float32)
             # Concatenate the forward and backward hidden states
             else:
                 size = int(self.hidden_size)
@@ -278,12 +278,13 @@ class DPDecoder(object):
                         if i == 0:
                             f_prob_start = prob_start
                             f_prob_end = prob_end
-                            is_continue = tf.constant(True, dtype=tf.bool, shape=(tf.shape(U)[0]))
+                            print "what U shape", tf.shape(U)
+                            is_continue = tf.ones_like(ns, dtype=tf.bool)
                         else:
-                            f_prob_start = prob_start * tf.expand_dims(tf.cast(is_continue, dtype=tf.float32), axis=1) * \
-                                + f_prob_start * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
-                            f_prob_end = prob_end * tf.expand_dims(tf.cast(is_continue, dtype=tf.float32), axis=1) * \
-                                + f_prob_end * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
+                            f_prob_start = prob_start * tf.expand_dims(tf.cast(is_continue, dtype=tf.float32), axis=1) + \
+                                 f_prob_start * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
+                            f_prob_end = prob_end * tf.expand_dims(tf.cast(is_continue, dtype=tf.float32), axis=1) + \
+                                 f_prob_end * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
                             is_continue = tf.logical_or(tf.equal(s, ns), tf.equal(e, ne))
                     s = ns
                     e = ne
