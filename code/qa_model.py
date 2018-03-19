@@ -217,7 +217,7 @@ class QAModel(object):
                     loss_start = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start[i], labels=self.ans_span[:, 0])
                     if self.FLAGS.decoder == "DPD" and i > 0:
                         total_loss_start += loss_start * tf.cast(is_continue, dtype=tf.float32)
-                        is_continue = tf.logical_not(tf.equal(self.startpos[i], self.startpos[i-1]))
+                        is_continue = tf.logical_and(is_continue, tf.logical_not(tf.equal(self.startpos[i], self.startpos[i-1])))
                     else:
                         total_loss_start += loss_start
                 self.loss_start = tf.reduce_mean(loss_start)
@@ -230,7 +230,7 @@ class QAModel(object):
                     loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end[i], labels=self.ans_span[:, 1]) # loss_start has shape (batch_size)
                     if self.FLAGS.decoder == "DPD" and i > 0:
                         total_loss_end += loss_end * tf.cast(is_continue, dtype=tf.float32)
-                        is_continue = tf.logical_not(tf.equal(self.endpos[i], self.endpos[i-1]))
+                        is_continue = tf.logical_and(is_continue, tf.logical_not(tf.equal(self.endpos[i], self.endpos[i-1])))
                     else:
                         total_loss_end += loss_end
                 self.loss_end = tf.reduce_mean(loss_end)
