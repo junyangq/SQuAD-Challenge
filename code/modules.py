@@ -189,9 +189,19 @@ class DPDecoder(object):
         mt1 = tf.reduce_max(Z1, axis=2)  # mt1: (B * m * l)
         mt1 = tf.nn.dropout(mt1, self.keep_prob)
 
-        Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
+        # mt1s = tf.split(mt1, 2, axis=0)
+        # mt2s = [None] * 2
 
+        # devices = ['/device:GPU:0', '/device:GPU:1']
+        # for idx in range(len(devices)):
+        #     with tf.device(devices[idx]):
+        #         Z2_sub = tf.tensordot(mt1s[idx], W2, [[2],[2]]) + b2
+        #         mt2s[idx] = tf.reduce_max(Z2_sub, axis=2)
+
+        # with tf.device('/device:CPU:0'):
+        Z2 = tf.tensordot(mt1, W2, [[2],[2]]) + b2  # Z2: (B * m * p * l)
         mt2 = tf.reduce_max(Z2, axis=2)  # mt2: (B * m * l)
+        # mt2 = tf.concat(mt2s, axis=0)
         mt2 = tf.nn.dropout(mt2, self.keep_prob)
 
         concat_mt1_mt2 = tf.concat([mt1, mt2], axis=2)
@@ -203,7 +213,7 @@ class DPDecoder(object):
 
     
 
-    def build_graph(self, U, context_mask, sample_type="greedy", ss=None, es=None):
+    def build_graph(self, U, context_mask, sample_type="greedy", ss=None, es=None, early_stop=False):
         """
         Inputs:
           U: Tensor shape (batch_size, context_len, 2 * hidden_size). Vector representation of context words
@@ -262,8 +272,23 @@ class DPDecoder(object):
                 beta, prob_end = self.HMN(U, hidden, Us, Ue, context_mask, scope="end")
 
                 if sample_type == "greedy":
-                    s = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
-                    e = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
+                    ns = tf.argmax(alpha, axis=1, output_type=tf.int32) # s: (B)
+                    ne = tf.argmax(beta, axis=1, output_type=tf.int32) # e: (B)
+                    if early_stop:
+                        if i == 0:
+                            f_prob_start = prob_start
+                            f_prob_end = prob_end
+                            is_continue = tf.constant(True, dtype=tf.bool, shape=(tf.shape(U)[0]))
+                        else:
+                            f_prob_start = prob_start * tf.expand_dims(tf.cast(is_continue, dtype=tf.float32), axis=1) * \
+                                + f_prob_start * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
+                            f_prob_end = prob_end * tf.expand_dims(tf.cast(is_continue, dtype=tf.float32), axis=1) * \
+                                + f_prob_end * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
+                            is_continue = tf.logical_or(tf.equal(s, ns), tf.equal(e, ne))
+                    s = ns
+                    e = ne
+                    ss[i] = s
+                    es[i] = e
                 elif sample_type == "random":
                     # s, e = tf.cond(exists, 
                     #     lambda: (ss[i], es[i]), 
@@ -300,7 +325,7 @@ class DPDecoder(object):
                     # print "shapeeeeeee:", tf.shape(tf.concat(ss, axis=0))
                     return alphas, betas, tf.concat(ss, axis=0), tf.concat(es,axis=0), s, e
             else:
-                return alphas, betas, prob_start, prob_end, s, e  # alpha, beta, prob_start, prob_end: (B * m)
+                return alphas, betas, f_prob_start, f_prob_end, s, e, ss, es  # alpha, beta, prob_start, prob_end: (B * m)
 
 
 

@@ -174,11 +174,11 @@ class QAModel(object):
 
         elif self.FLAGS.decoder == "DPD":
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
-            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, _, _ = decoder.build_graph(attn_output, self.context_mask)
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, _, _, self.startpos, self.endpos = decoder.build_graph(attn_output, self.context_mask, early_stop=True)
 
         elif self.FLAGS.decoder == "DPDRL":
             decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
-            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, self.fs, self.fe = decoder.build_graph(attn_output, self.context_mask, "greedy")
+            self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, self.fs, self.fe, _, _ = decoder.build_graph(attn_output, self.context_mask, "greedy")
             self.logits_start_sample, self.logits_end_sample, self.ss_hat, self.es_hat, self.s_hat, self.e_hat = tf.cond(self.exists, 
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random", self.ss, self.es),
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random")
@@ -210,16 +210,30 @@ class QAModel(object):
 
             if self.FLAGS.decoder == "DPD" or self.FLAGS.decoder == "DPDRL" :
                 # Calculate loss for prediction of start position
-                self.loss_start = tf.zeros((), dtype=tf.float32)
+                # self.loss_start = tf.zeros((), dtype=tf.float32)
+                total_loss_start = tf.zeros((tf.shape(self.startpos)[0]), dtype=tf.float32)
+                is_continue = tf.constant(True, dtype=tf.bool, shape=(tf.shape(self.startpos)[0]))
                 for i in range(self.FLAGS.DPD_n_iter):
-                    loss_start = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start[i], labels=self.ans_span[:, 0]) # loss_start has shape (batch_size)
-                    self.loss_start += tf.reduce_mean(loss_start)
+                    loss_start = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start[i], labels=self.ans_span[:, 0])
+                    if self.FLAGS.decoder == "DPD" and i > 0:
+                        total_loss_start += loss_start * tf.cast(is_continue, dtype=tf.float32)
+                        is_continue = tf.logical_not(tf.equal(self.startpos[i], self.startpos[i-1]))
+                    else:
+                        total_loss_start += loss_start
+                self.loss_start = tf.reduce_mean(loss_start)
 
                 # Calculate loss for prediction of end position
-                self.loss_end = tf.zeros((), dtype=tf.float32)
+                # self.loss_end = tf.zeros((), dtype=tf.float32)
+                total_loss_end = tf.zeros((tf.shape(self.endpos)[0]), dtype=tf.float32)
+                is_continue = tf.constant(True, dtype=tf.bool, shape=(tf.shape(self.endpos)[0]))
                 for i in range(self.FLAGS.DPD_n_iter):
                     loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end[i], labels=self.ans_span[:, 1]) # loss_start has shape (batch_size)
-                    self.loss_end += tf.reduce_mean(loss_end)
+                    if self.FLAGS.decoder == "DPD" and i > 0:
+                        total_loss_end += loss_end * tf.cast(is_continue, dtype=tf.float32)
+                        is_continue = tf.logical_not(tf.equal(self.endpos[i], self.endpos[i-1]))
+                    else:
+                        total_loss_end += loss_end
+                self.loss_end = tf.reduce_mean(loss_end)
 
             else:
                 # Calculate loss for prediction of start position
