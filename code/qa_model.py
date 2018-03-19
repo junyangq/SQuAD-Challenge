@@ -211,8 +211,9 @@ class QAModel(object):
             if self.FLAGS.decoder == "DPD" or self.FLAGS.decoder == "DPDRL" :
                 # Calculate loss for prediction of start position
                 # self.loss_start = tf.zeros((), dtype=tf.float32)
-                total_loss_start = tf.zeros(tf.shape(self.startpos), dtype=tf.float32)
-                is_continue = tf.ones_like(self.startpos, dtype=tf.bool)
+                if self.FLAGS.decoder == "DPD":
+                    total_loss_start = tf.zeros(tf.shape(self.startpos), dtype=tf.float32)
+                    is_continue = tf.ones_like(self.startpos, dtype=tf.bool)
                 for i in range(self.FLAGS.DPD_n_iter):
                     loss_start = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start[i], labels=self.ans_span[:, 0])
                     if self.FLAGS.decoder == "DPD" and i > 0:
@@ -224,8 +225,9 @@ class QAModel(object):
 
                 # Calculate loss for prediction of end position
                 # self.loss_end = tf.zeros((), dtype=tf.float32)
-                total_loss_end = tf.zeros(tf.shape(self.endpos), dtype=tf.float32)
-                is_continue =tf.ones_like(self.endpos, dtype=tf.bool)
+                if self.FLAGS.decoder == "DPD":
+                    total_loss_end = tf.zeros(tf.shape(self.endpos), dtype=tf.float32)
+                    is_continue =tf.ones_like(self.endpos, dtype=tf.bool)
                 for i in range(self.FLAGS.DPD_n_iter):
                     loss_end = tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end[i], labels=self.ans_span[:, 1]) # loss_start has shape (batch_size)
                     if self.FLAGS.decoder == "DPD" and i > 0:
