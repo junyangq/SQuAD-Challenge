@@ -285,7 +285,7 @@ class DPDecoder(object):
                                  f_prob_start * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
                             f_prob_end = prob_end * tf.expand_dims(tf.cast(is_continue, dtype=tf.float32), axis=1) + \
                                  f_prob_end * tf.expand_dims(tf.cast(tf.logical_not(is_continue), dtype=tf.float32), axis=1)
-                            is_continue = tf.logical_and(is_continue, tf.logical_or(tf.equal(s, ns), tf.equal(e, ne)))
+                            is_continue = tf.logical_and(is_continue, tf.logical_or(tf.not_equal(s, ns), tf.not_equal(e, ne)))
                     s = ns
                     e = ne
                     ss[i] = s
