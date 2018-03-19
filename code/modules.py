@@ -46,7 +46,7 @@ class RNNEncoder(object):
         """
         
         self.hidden_size = hidden_size
-        self.keep_prob = keep_prob
+        self.keep_prob = keep_prob-0.1
         self.embed_size = embed_size
 
         local_device_protos = device_lib.list_local_devices()
@@ -63,7 +63,7 @@ class RNNEncoder(object):
         #     self.rnn_cell_bw = DropoutWrapper(self.rnn_cell_bw, input_keep_prob=self.keep_prob)
 
             self.rnn_cell = rnn_cell.BasicLSTMCell(self.hidden_size)
-            self.rnn_cell = DropoutWrapper(self.rnn_cell, input_keep_prob=self.keep_prob)
+             # self.rnn_cell = DropoutWrapper(self.rnn_cell, input_keep_prob=self.keep_prob)
 
     def build_graph(self, inputs, masks):
         """
@@ -451,7 +451,7 @@ class CoAttn(object):
           key_vec_size: size of the key vectors. int
           value_vec_size: size of the value vectors. int
         """
-        self.keep_prob = keep_prob
+        self.keep_prob = keep_prob-0.1
         self.key_vec_size = key_vec_size
         self.value_vec_size = value_vec_size
         local_device_protos = device_lib.list_local_devices()
@@ -546,7 +546,7 @@ class CoAttn(object):
 
             # Concatenate C2Q_Attn and S:
             C_D = tf.concat([D, C2Q_Attn, S], 2)  # (batch_size, num_keys, 3 * value_vec_size)
-            C_D = tf.nn.dropout(C_D, self.keep_prob)
+            # C_D = tf.nn.dropout(C_D, self.keep_prob)
             print('co_context size is: ', C_D.shape)
 
             # co_input = tf.concat([tf.transpose(D, perm = [0, 2, 1]), C_D], 1)
