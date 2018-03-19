@@ -220,7 +220,7 @@ class QAModel(object):
                         is_continue = tf.logical_and(is_continue, tf.not_equal(self.startpos[i], self.startpos[i-1]))
                     else:
                         total_loss_start += loss_start
-                self.loss_start = tf.reduce_mean(loss_start)
+                self.loss_start = tf.reduce_mean(total_loss_start)
 
                 # Calculate loss for prediction of end position
                 # self.loss_end = tf.zeros((), dtype=tf.float32)
@@ -233,7 +233,7 @@ class QAModel(object):
                         is_continue = tf.logical_and(is_continue, tf.not_equal(self.endpos[i], self.endpos[i-1]))
                     else:
                         total_loss_end += loss_end
-                self.loss_end = tf.reduce_mean(loss_end)
+                self.loss_end = tf.reduce_mean(total_loss_end)
 
             else:
                 # Calculate loss for prediction of start position
