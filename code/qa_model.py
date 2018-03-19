@@ -211,7 +211,7 @@ class QAModel(object):
             if self.FLAGS.decoder == "DPD" or self.FLAGS.decoder == "DPDRL" :
                 # Calculate loss for prediction of start position
                 # self.loss_start = tf.zeros((), dtype=tf.float32)
-                total_loss_start = tf.zeros(tf.shape(self.startpos), dtype=tf.float32)
+                # total_loss_start = tf.fill(tf.shape(self.logits_start[0])[0], 0.0)
                 if self.FLAGS.decoder == "DPD":
                     is_continue = tf.ones_like(self.startpos, dtype=tf.bool)
                 for i in range(self.FLAGS.DPD_n_iter):
@@ -220,12 +220,15 @@ class QAModel(object):
                         total_loss_start += loss_start * tf.cast(is_continue, dtype=tf.float32)
                         is_continue = tf.logical_and(is_continue, tf.not_equal(self.startpos[i], self.startpos[i-1]))
                     else:
-                        total_loss_start += loss_start
+                        if i == 0:
+                            total_loss_start = loss_start
+                        else:
+                            total_loss_start += loss_start
                 self.loss_start = tf.reduce_mean(total_loss_start)
 
                 # Calculate loss for prediction of end position
                 # self.loss_end = tf.zeros((), dtype=tf.float32)
-                total_loss_end = tf.zeros(tf.shape(self.endpos), dtype=tf.float32)
+                # total_loss_end = tf.fill(tf.shape(self.logits_end[0])[0], 0.0)
                 if self.FLAGS.decoder == "DPD":
                     is_continue =tf.ones_like(self.endpos, dtype=tf.bool)
                 for i in range(self.FLAGS.DPD_n_iter):
@@ -234,7 +237,10 @@ class QAModel(object):
                         total_loss_end += loss_end * tf.cast(is_continue, dtype=tf.float32)
                         is_continue = tf.logical_and(is_continue, tf.not_equal(self.endpos[i], self.endpos[i-1]))
                     else:
-                        total_loss_end += loss_end
+                        if i == 0:
+                            total_loss_end = loss_end
+                        else:
+                            total_loss_end += loss_end
                 self.loss_end = tf.reduce_mean(total_loss_end)
 
             else:
@@ -252,6 +258,8 @@ class QAModel(object):
 
             tf.summary.scalar('loss_end', self.loss_end)
 
+            self.loss = self.loss_start + self.loss_end
+
             if self.FLAGS.decoder == "DPDRL":
                 self.loss_ce = self.loss + 0.0
                 self.sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
@@ -268,30 +276,29 @@ class QAModel(object):
 
                 tf.summary.scalar('loss', self.loss_ce)
                 tf.summary.scalar('loss_tot', self.loss)
-
-            else:
-                # Add the two losses
-                self.loss = self.loss_start + self.loss_end
-
-            if self.FLAGS.decoder == "DPDRL":
-                self.loss_ce = self.loss + 0.0
-                sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
-                sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
-                self.loss_start_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
-                for i in range(self.FLAGS.DPD_n_iter):
-                    self.loss_start_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start_sample[i], labels=self.ss_hat[i]) # loss_start has shape (batch_size)
-                self.loss_end_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
-                for i in range(self.FLAGS.DPD_n_iter):
-                    self.loss_end_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end_sample[i], labels=self.es_hat[i]) # loss_start has shape (batch_size)
-                rl_loss = -tf.reduce_mean(self.reward * (self.loss_start_sample + self.loss_end_sample))  # !!!!!!!! not adding self.logits_start_sample
-                self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
-                        tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
-
-                tf.summary.scalar('loss', self.loss_ce)
-                tf.summary.scalar('loss_tot', self.loss)
-
             else:
                 tf.summary.scalar('loss', self.loss)
+                # Add the two losses
+
+            # if self.FLAGS.decoder == "DPDRL":
+            #     self.loss_ce = self.loss + 0.0
+            #     sigma_ce = tf.get_variable('sigma_ce', shape=(), dtype=tf.float32)
+            #     sigma_rl = tf.get_variable('sigma_rl', shape=(), dtype=tf.float32)
+            #     self.loss_start_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
+            #     for i in range(self.FLAGS.DPD_n_iter):
+            #         self.loss_start_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_start_sample[i], labels=self.ss_hat[i]) # loss_start has shape (batch_size)
+            #     self.loss_end_sample = tf.zeros([self.FLAGS.batch_size], dtype=tf.float32)
+            #     for i in range(self.FLAGS.DPD_n_iter):
+            #         self.loss_end_sample += tf.nn.sparse_softmax_cross_entropy_with_logits(logits=self.logits_end_sample[i], labels=self.es_hat[i]) # loss_start has shape (batch_size)
+            #     rl_loss = -tf.reduce_mean(self.reward * (self.loss_start_sample + self.loss_end_sample))  # !!!!!!!! not adding self.logits_start_sample
+            #     self.loss = self.loss / (2.0 * sigma_ce * sigma_ce) + rl_loss / (2.0 * sigma_rl * sigma_rl) + \
+            #             tf.log(sigma_ce * sigma_ce) + tf.log(sigma_rl * sigma_rl)
+
+            #     tf.summary.scalar('loss', self.loss_ce)
+            #     tf.summary.scalar('loss_tot', self.loss)
+
+            # else:
+            #     tf.summary.scalar('loss', self.loss)
 
 
     def run_train_iter(self, session, batch, summary_writer):
