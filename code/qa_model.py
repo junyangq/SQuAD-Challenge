@@ -177,7 +177,7 @@ class QAModel(object):
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, _, _, self.startpos, self.endpos = decoder.build_graph(attn_output, self.context_mask, early_stop=True)
 
         elif self.FLAGS.decoder == "DPDRL":
-            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, 2*self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
+            decoder = DPDecoder(self.keep_prob, self.FLAGS.DPD_n_iter, self.FLAGS.context_len, self.FLAGS.hidden_size, self.FLAGS.pool_size, self.FLAGS.DPD_init)
             self.logits_start, self.logits_end, self.probdist_start, self.probdist_end, self.fs, self.fe, _, _ = decoder.build_graph(attn_output, self.context_mask, "greedy")
             self.logits_start_sample, self.logits_end_sample, self.ss_hat, self.es_hat, self.s_hat, self.e_hat = tf.cond(self.exists, 
                 lambda: decoder.build_graph(attn_output, self.context_mask, "random", self.ss, self.es),
